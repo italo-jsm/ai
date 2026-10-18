@@ -1,0 +1,4 @@
+databaseChangeLog:
+  - include:
+      file: 001-memory.sql
+      relativeToChangelogFile: true

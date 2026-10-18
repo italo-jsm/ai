@@ -1,6 +1,6 @@
 package com.italo.ai.config;
 
-import com.italo.ai.tools.TestTools;
+import com.italo.ai.tools.TimeTool;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -11,7 +11,7 @@ public class AiConfiguration {
     @Bean
     ChatClient chatClient(
             ChatClient.Builder builder,
-            TestTools testTools) {
+            TimeTool timeTool) {
 
         return builder
                 .defaultSystem("""
@@ -19,7 +19,7 @@ public class AiConfiguration {
                     Responda em português brasileiro.
                     Utilize ferramentas quando necessário.
                     """)
-                .defaultTools(testTools)
+                .defaultTools(timeTool)
                 .build();
     }
 }
