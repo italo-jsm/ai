@@ -45,7 +45,8 @@ usuário, data de criação, tipo, sujeito, predicado, valor e motivo.
 A gravação é transacional. Extrações vazias não geram registros.
 A migração inicial cria diretamente a tabela `memory`, com usuário e data.
 `MemoryExtraction` permanece como DTO do agente.
-A busca semântica consulta o pgvector; a gravação atual não indexa novos embeddings.
+A busca semântica consulta o pgvector. O chat pode indexar novas memórias após o
+commit SQL quando a indexação está habilitada.
 
 Envie o identificador do usuário no chat:
 
@@ -75,18 +76,95 @@ Testes de persistência e serviço, sem Ollama nem PostgreSQL:
 ```
 
 
-### Uso das memórias no chat
+### RAG de memórias no chat
 
-Antes de responder, o chat consulta pelo JPA as memórias do `userId` recebido e
-inclui até 20 registros no contexto. A seleção é das mais recentes, com desempate
-pelo ID. O agente escolhe quais informações ajudam na resposta e prioriza a mensagem
-atual quando houver conflito. Usuários sem memórias seguem o fluxo normal.
+A recuperação de contexto usa a interface `MemoryRetriever`, com duas estratégias:
 
-Configure `app.memory.context-limit` (1 a 100) para ajustar a quantidade carregada.
-Esta recuperação não consulta o pgvector nem gera embeddings. Após responder, o
-chat continua extraindo e salvando novas memórias. O `userId` ainda é informado
-pelo cliente; quando houver autenticação, deverá vir da sessão autenticada.
+- `sql` (padrão): seleciona as memórias mais recentes do usuário, ordenadas por
+  data decrescente e ID como desempate.
+- `semantic`: usa a mensagem atual para buscar memórias por similaridade no
+  pgvector. Filtra `userId` e `kind=memory`, carrega os registros oficiais no
+  SQL e preserva a ordem de relevância. Vetores órfãos são ignorados.
 
+Configure em `application.properties` ou por argumentos do Spring Boot:
+
+```properties
+app.memory.retrieval-strategy=sql
+app.memory.indexing.enabled=false
+app.memory.context-limit=20
+```
+
+Recuperação e indexação são independentes. Para começar, habilite a indexação
+mantendo SQL como estratégia:
+
+```bash
+./gradlew bootRun --args='--app.memory.indexing.enabled=true'
+```
+
+Envie mensagens com fatos ou preferências para gerar novas memórias. Depois,
+habilite também a recuperação semântica:
+
+```bash
+./gradlew bootRun --args='--app.memory.indexing.enabled=true --app.memory.retrieval-strategy=semantic'
+```
+
+O chat gera a resposta, extrai memórias, confirma o salvamento SQL e chama
+`AsyncMemoryIndexingService`, um bean separado com `@Async`. A indexação é
+executada em segundo plano pelo executor do Spring, sem esperar pelos embeddings
+para retornar a resposta. Quando habilitado, `MemoryIndexer` gera embeddings e
+grava documentos com o UUID SQL, texto da memória e metadados de usuário e tipo.
+Quando desabilitado, `NoOpMemoryIndexer` não chama o modelo de embeddings.
+Reindexar o mesmo UUID atualiza o documento vetorial, sem duplicá-lo.
+
+A busca semântica tem consistência eventual: uma mensagem enviada logo após o
+salvamento pode ainda não encontrar a nova memória. Se a indexação falhar, a
+memória permanece salva no SQL e o erro é registrado sem conteúdo pessoal.
+Falha ao submeter a tarefa também não impede o retorno da resposta.
+As tarefas ficam em memória; encerrar a aplicação antes de concluí-las pode
+perder a indexação. Não existem retentativas, fila persistente, indexação
+automática do histórico ou backfill.
+Memórias antigas e indexações que falharem continuam acessíveis por SQL, mas não
+entram automaticamente na busca semântica. A chamada direta de
+`MemoryService.save` apenas persiste no SQL; o chat coordena a indexação.
+
+Uma busca semântica vazia não adiciona contexto. Se o serviço de embeddings ou a
+consulta vetorial falhar durante a recuperação, o erro é propagado; não existe
+fallback automático. Para voltar à seleção de memórias recentes, configure
+`app.memory.retrieval-strategy=sql`; isso não altera o salvamento nem desliga
+a indexação.
+
+`app.memory.context-limit` aceita valores de 1 a 100. O contexto preserva
+negações, trata memórias como dados e prioriza a mensagem atual em conflitos.
+Todas as recuperações filtram o usuário informado pelo cliente; ao adicionar
+autenticação, esse identificador deverá vir da sessão autenticada.
+
+### Testes
+
+A suíte padrão usa H2 e não exige PostgreSQL nem Ollama:
+
+```bash
+./gradlew test
+```
+
+Com o PostgreSQL local iniciado, execute os testes existentes de inicialização
+e persistência:
+
+```bash
+RUN_POSTGRES_TESTS=true ./gradlew test --tests '*AiApplicationTests' --tests '*PostgreSqlMemoryPersistenceTest'
+```
+
+A integração RAG usa PostgreSQL/pgvector real e embeddings determinísticos de
+768 dimensões, sem inferência Ollama. Verifica commit antes de indexar,
+indexação em segundo plano, falha sem perda do SQL, isolamento e atualização
+pelo mesmo UUID:
+
+```bash
+RUN_RAG_POSTGRES_TESTS=true ./gradlew test --tests '*MemoryRagPostgresTest'
+```
+
+Ao repetir testes opt-in após mudar variáveis de ambiente, acrescente
+`--rerun-tasks` para evitar reutilização de um resultado anterior do Gradle.
+Os testes de RAG usam usuários exclusivos e removem somente seus próprios registros.
 
 ### Fidelidade das memórias
 
