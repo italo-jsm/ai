@@ -183,3 +183,91 @@ RUN_OLLAMA_TESTS=true ./gradlew test --tests '*MemoryExtractorOllamaTest'
 
 Esses testes consultam o modelo sem salvar as extrações. Na suíte padrão, ficam
 desabilitados para não exigir inferência local em cada execução.
+
+### Busca na web com Brave
+
+O serviço `BraveSearchService` pesquisa na Brave Search e retorna até cinco
+resultados, na ordem do provedor, com `title`, `url` e `description`.
+O serviço continua independente de IA. A classe `WebSearchTool` o expõe ao
+modelo como `searchWeb`, registrada no `ChatClient` junto da ferramenta de
+horário. Não existe endpoint REST separado para busca.
+
+Configure a credencial no ambiente antes de iniciar a aplicação:
+
+```bash
+export BRAVE_API_KEY='sua-chave'
+./gradlew bootRun
+```
+
+Configuração disponível em `application.properties`:
+
+```properties
+app.brave-search.api-key=${BRAVE_API_KEY:}
+app.brave-search.base-url=https://api.search.brave.com
+app.brave-search.timeout=10s
+```
+
+O timeout deve ser positivo e é aplicado à conexão e à espera HTTP.
+A aplicação pode iniciar sem chave; tentar pesquisar sem configurá-la produz
+`BraveSearchException` com razão `CONFIGURATION`.
+A URL base pode ser substituída em testes por um servidor simulado.
+
+Injete `BraveSearchService` no consumidor e chame:
+
+```java
+List<SearchResult> results = braveSearchService.search("Fernando da Gata");
+```
+
+Consultas nulas ou em branco produzem `IllegalArgumentException`, sem chamar
+a API. Espaços externos são removidos e caracteres especiais são codificados.
+Uma busca válida sem resultados retorna lista vazia. Descrição ausente retorna
+string vazia.
+
+Falhas da integração geram `BraveSearchException`; `reason()` identifica:
+`AUTHENTICATION` (401/403), `RATE_LIMIT` (429), `UNAVAILABLE` (5xx/conexão),
+`TIMEOUT`, `INVALID_RESPONSE` ou `REQUEST_FAILED` (demais erros HTTP).
+As exceções não incluem a chave, a consulta ou o corpo de erro do provedor.
+Não existem retentativas, cache, persistência, paginação nem leitura das páginas.
+
+Os testes usam um servidor HTTP local com chave fictícia, sem consumir a Brave,
+PostgreSQL ou Ollama:
+
+```bash
+./gradlew test --tests '*BraveSearchServiceTest'
+```
+
+Contrato do provedor: [Brave Web Search API](https://api-dashboard.search.brave.com/api-reference/web/search/get).
+
+
+### Busca Brave pelo modelo
+
+Com `BRAVE_API_KEY` configurada, use o endpoint de chat existente:
+
+```json
+{"userId":"italo","message":"Pesquise na internet quem foi Fernando da Gata e cite as fontes."}
+```
+
+A ferramenta `searchWeb(query)` recebe somente o termo de pesquisa. A chave,
+URL do provedor e timeout permanecem controlados pela aplicação. O resultado
+contém `results` (título, URL e descrição) e `error`:
+
+- Sucesso: resultados encontrados e `error=null`.
+- Sem fontes: lista vazia e `error=null`.
+- Falha de integração ou consulta inválida: lista vazia e erro explícito,
+  sem propagar detalhes HTTP ao modelo.
+
+As instruções orientam o modelo a buscar quando o usuário pedir pesquisa,
+informações atuais ou identificação/biografia de pessoas, citar as URLs usadas,
+informar falhas e pedir esclarecimento em casos de nomes ambíguos.
+Os trechos retornados são dados, não instruções. A ferramenta não abre páginas.
+
+A decisão de chamar a ferramenta continua sendo do modelo; o registro não
+garante que toda pergunta provoque uma busca. Não há pesquisa automática no
+controller nem persistência dos resultados da web como memórias.
+
+Teste de registro e execução pelo callback real do Spring AI, sem Ollama ou
+Brave real:
+
+```bash
+./gradlew test --tests '*WebSearchToolTest'
+```
