@@ -27,7 +27,9 @@ import static org.mockito.Mockito.*;
 @SpringBootTest(properties = {
     "app.memory.retrieval-strategy=semantic",
     "app.memory.indexing.enabled=true",
-    "spring.ai.model.embedding=none"
+    "spring.ai.model.embedding=none",
+    "spring.ai.openai.api-key=integration-test-key",
+    "spring.ai.openai.chat.model=integration-test-model"
 })
 @Import(MemoryRagPostgresTest.TestEmbeddings.class)
 @EnabledIfEnvironmentVariable(named = "RUN_RAG_POSTGRES_TESTS", matches = "true")

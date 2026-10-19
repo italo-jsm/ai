@@ -1,6 +1,6 @@
 # AI — ambiente local
 
-Requisitos: JDK 21, Docker com Compose e Ollama local.
+Requisitos: JDK 21, Docker com Compose, Ollama local para embeddings e acesso à Groq para chat.
 
 1. Inicie o Docker e crie o banco PostgreSQL com pgvector:
 
@@ -11,22 +11,28 @@ Requisitos: JDK 21, Docker com Compose e Ollama local.
    Banco: `ai`; usuario: `ai`; senha local: `ai_local`; porta: `5433`.
    Os dados persistem no volume `postgres_data`.
 
-2. Inicie o Ollama no host (pelo aplicativo ou `ollama serve`) e prepare os modelos:
+2. Inicie o Ollama no host (pelo aplicativo ou `ollama serve`) e prepare o modelo de embeddings:
 
    ```bash
    ollama list
    ollama pull nomic-embed-text
    ```
 
-   O modelo de chat `gemma4:12b-mlx` deve estar disponivel com esse nome no Ollama.
    O modelo `nomic-embed-text` gera os embeddings de 768 dimensoes para o pgvector.
+   Não é necessário carregar um modelo de chat no Ollama para o uso normal.
    A aplicacao nao baixa modelos automaticamente.
 
-3. Inicie a aplicacao:
+3. Configure as variáveis da Groq e inicie a aplicação:
 
    ```bash
+   export GROQ_API_KEY='sua-chave'
+   export GROQ_MODEL='openai/gpt-oss-20b'
    ./gradlew bootRun
    ```
+
+   Use em `GROQ_MODEL` o identificador de um modelo disponível na sua conta
+   com suporte a tool calling. As duas variáveis são obrigatórias para o chat.
+   A aplicação não carrega arquivo `.env` automaticamente.
 
 O Ollama e acessado em `http://localhost:11434`. O Spring AI inicializa sua tabela
 vetorial; o Liquibase cria as tabelas de memória e o Hibernate valida o esquema.
@@ -37,6 +43,53 @@ podem ser exportadas no terminal antes de iniciar tanto o Compose quanto a aplic
 
 Para parar o banco preservando os dados: `docker compose down`.
 
+
+### Chat na Groq e embeddings locais
+
+O adaptador `spring-ai-starter-model-openai` do Spring AI conecta à Groq por sua
+API compatível. O prefixo `openai` identifica o adaptador; as requisições vão
+para a URL Groq configurada:
+
+```properties
+spring.ai.model.chat=openai
+spring.ai.openai.base-url=https://api.groq.com/openai/v1
+spring.ai.openai.api-key=${GROQ_API_KEY}
+spring.ai.openai.chat.model=${GROQ_MODEL}
+spring.ai.model.embedding=ollama
+spring.ai.ollama.embedding.model=nomic-embed-text
+```
+
+Chat e extração de memórias usam o modelo escolhido em `GROQ_MODEL`. Mensagens
+e memórias incluídas no contexto são enviadas à Groq. As ferramentas de horário
+e busca Brave permanecem disponíveis no chat; `BRAVE_API_KEY` continua separada.
+
+O Ollama permanece necessário para indexar e buscar por embeddings.
+A troca do modelo de chat não altera o modelo vetorial, as 768 dimensões ou
+os registros existentes; não exige reindexação.
+
+Compatibilidade com modelos de raciocínio na Groq: o Spring AI 2.0.1 pode ler
+`reasoning` da resposta e reenviá-lo como `reasoning_content` no histórico,
+campo que a Groq rejeita com HTTP 400. A configuração abaixo habilita um advisor
+que remove somente o metadado `reasoningContent` de cópias das mensagens do
+assistente antes de cada chamada do modelo, inclusive após ferramentas:
+
+```properties
+app.groq.reasoning-history-filter-enabled=true
+```
+
+O conteúdo, as chamadas de ferramentas e seus resultados são preservados.
+Não desliga o raciocínio do modelo nem altera a resposta original.
+Essa compatibilidade é específica da Groq; desative a opção ao usar um provedor
+que exija o reenvio de raciocínio. O fluxo atual usa chamadas síncronas
+`ChatClient.call()`.
+
+`GroqConfigurationTest` verifica seleção dos provedores, endpoint compatível,
+autenticação com chave fictícia, execução de ferramenta e extração JSON.
+Usa H2 e servidor HTTP local, sem Groq, Ollama ou Brave reais:
+
+```bash
+./gradlew test --tests '*GroqConfigurationTest'
+```
 
 ### Memórias do agente
 
@@ -175,7 +228,9 @@ Isso reduz erros de interpretação, mas a extração continua dependendo do mod
 O contexto traduz registros antigos como `DISLIKE=true` para uma frase explícita
 de rejeição, sem alterar os registros do banco.
 
-Para executar os testes de regressão com o Ollama real disponível:
+Os testes abaixo continuam exercitando especificamente o Ollama: substituem
+a seleção de chat da aplicação por `ollama` e usam `qwen2.5:7b`.
+Prepare esse modelo local e o PostgreSQL para executá-los; eles não validam a Groq:
 
 ```bash
 RUN_OLLAMA_TESTS=true ./gradlew test --tests '*MemoryExtractorOllamaTest'

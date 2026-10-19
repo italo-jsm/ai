@@ -7,7 +7,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import static org.assertj.core.api.Assertions.*;
 
-@SpringBootTest
+@SpringBootTest(properties = {
+    "spring.ai.model.chat=ollama",
+    "app.groq.reasoning-history-filter-enabled=false",
+    "spring.ai.ollama.chat.model=qwen2.5:7b",
+    "spring.ai.openai.api-key=unused-in-ollama-test",
+    "spring.ai.openai.chat.model=unused-in-ollama-test"
+})
 @EnabledIfEnvironmentVariable(named = "RUN_OLLAMA_TESTS", matches = "true")
 class MemoryExtractorOllamaTest {
     @Autowired MemoryExtractor extractor;
