@@ -4,20 +4,21 @@ import com.italo.ai.memory.persistence.*;
 import com.italo.ai.memory.service.MemoryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.vectorstore.VectorStore;
+import com.italo.ai.memory.retrieval.SemanticMemoryRetriever;
 import java.util.List;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class MemoryServiceTest {
     @Test void rejectsMissingOwnerBeforeSaving() {
-        var service = new MemoryService(mock(MemoryRepository.class), mock(VectorStore.class));
+        var service = new MemoryService(mock(MemoryRepository.class), mock(SemanticMemoryRetriever.class));
         assertThatThrownBy(() -> service.save(" ", new MemoryExtraction(List.of())))
             .isInstanceOf(IllegalArgumentException.class);
     }
     @Test void savesCandidateFieldsAndReturnsMemoryIdentity() {
         var repository = mock(MemoryRepository.class);
         when(repository.saveAllAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
-        var service = new MemoryService(repository, mock(VectorStore.class));
+        var service = new MemoryService(repository, mock(SemanticMemoryRetriever.class));
         var result = service.save("alice", new MemoryExtraction(List.of(new MemoryCandidate(MemoryType.FACT, "alice", "vive em", "Recife", "explícito"))));
         assertThat(result).singleElement().satisfies(memory -> {
             assertThat(memory.getId()).isNotNull();
@@ -39,7 +40,7 @@ class MemoryServiceTest {
             org.springframework.ai.document.Document.builder().id(foreignId.toString()).text("other user").build(),
             org.springframework.ai.document.Document.builder().id(first.getId().toString()).text("Recife").build()));
         when(repository.findByIdInAndUserId(any(), eq("alice"))).thenReturn(List.of(first, second));
-        var service = new MemoryService(repository, vectorStore);
+        var service = new MemoryService(repository, new SemanticMemoryRetriever(repository, vectorStore));
         assertThat(service.semanticSearch("alice", "gostos", 3)).extracting(MemoryService.MemoryView::id)
             .containsExactly(second.getId(), first.getId());
     }

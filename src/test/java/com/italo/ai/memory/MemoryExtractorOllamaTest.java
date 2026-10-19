@@ -7,7 +7,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import static org.assertj.core.api.Assertions.*;
 
-@SpringBootTest
+@SpringBootTest(properties = {
+    "spring.ai.model.chat=ollama",
+    "app.groq.reasoning-history-filter-enabled=false",
+    "spring.ai.ollama.chat.model=qwen2.5:7b",
+    "spring.ai.openai.api-key=unused-in-ollama-test",
+    "spring.ai.openai.chat.model=unused-in-ollama-test"
+})
 @EnabledIfEnvironmentVariable(named = "RUN_OLLAMA_TESTS", matches = "true")
 class MemoryExtractorOllamaTest {
     @Autowired MemoryExtractor extractor;
@@ -31,13 +37,12 @@ class MemoryExtractorOllamaTest {
         });
     }
     @Test void answersWithNegationFromLegacyDislikeMemory() {
-        var memories = org.mockito.Mockito.mock(com.italo.ai.memory.service.MemoryService.class);
+        var memories = org.mockito.Mockito.mock(com.italo.ai.memory.retrieval.MemoryRetriever.class);
         var memory = new com.italo.ai.memory.service.MemoryService.MemoryView(java.util.UUID.randomUUID(), "italo",
             java.time.Instant.now(), com.italo.ai.memory.model.MemoryType.PREFERENCE, "petista", "DISLIKE", "true", null);
-        org.mockito.Mockito.when(memories.search("italo", null, null, null, null,
-            org.springframework.data.domain.PageRequest.of(0, 20)))
-            .thenReturn(new org.springframework.data.domain.PageImpl<>(java.util.List.of(memory)));
-        var context = new com.italo.ai.memory.service.MemoryContextService(memories, 20).contextFor("italo");
+        org.mockito.Mockito.when(memories.retrieve("italo", "Me conte o que vc sabe sobre mim", 20))
+            .thenReturn(java.util.List.of(memory));
+        var context = new com.italo.ai.memory.service.MemoryContextService(memories, new com.italo.ai.memory.service.MemoryTextFormatter(), 20).contextFor("italo", "Me conte o que vc sabe sobre mim");
         var answer = chatClient.prompt()
             .options(org.springframework.ai.chat.prompt.ChatOptions.builder().temperature(0.0))
             .messages(new org.springframework.ai.chat.messages.SystemMessage(context))

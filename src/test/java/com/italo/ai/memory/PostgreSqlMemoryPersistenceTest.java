@@ -8,5 +8,6 @@ import org.springframework.test.context.TestPropertySource;
     "spring.datasource.driver-class-name=org.postgresql.Driver",
     "spring.liquibase.enabled=false"
 })
+@org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable(named = "RUN_POSTGRES_TESTS", matches = "true")
 class PostgreSqlMemoryPersistenceTest extends MemoryPersistenceTest {
 }
