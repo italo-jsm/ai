@@ -1,6 +1,7 @@
 package com.italo.ai.config;
 
 import com.italo.ai.tools.TimeTool;
+import com.italo.ai.tools.FileTool;
 import com.italo.ai.chat.GroqReasoningHistoryAdvisor;
 import org.springframework.beans.factory.annotation.Value;
 import com.italo.ai.tools.WebSearchTool;
@@ -16,6 +17,7 @@ public class AiConfiguration {
             ChatClient.Builder builder,
             TimeTool timeTool,
             WebSearchTool webSearchTool,
+            FileTool fileTool,
             @Value("${app.groq.reasoning-history-filter-enabled:false}") boolean filterReasoningHistory) {
 
         if (filterReasoningHistory) builder.defaultAdvisors(new GroqReasoningHistoryAdvisor());
@@ -32,7 +34,7 @@ public class AiConfiguration {
                     Se houver pessoas diferentes com o mesmo nome, peça esclarecimento.
                     Não afirme ter pesquisado na internet sem chamar a ferramenta.
                     """)
-                .defaultTools(timeTool, webSearchTool)
+                .defaultTools(timeTool, webSearchTool, fileTool)
                 .build();
     }
 }
