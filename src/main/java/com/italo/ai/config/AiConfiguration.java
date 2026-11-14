@@ -3,6 +3,8 @@ package com.italo.ai.config;
 import com.italo.ai.tools.TimeTool;
 import com.italo.ai.chat.GroqReasoningHistoryAdvisor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import com.italo.ai.tools.WebSearchTool;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.context.annotation.Bean;
@@ -14,11 +16,12 @@ public class AiConfiguration {
     @Bean
     ChatClient chatClient(
             ChatClient.Builder builder,
+            Environment environment,
             TimeTool timeTool,
             WebSearchTool webSearchTool,
             @Value("${app.groq.reasoning-history-filter-enabled:false}") boolean filterReasoningHistory) {
 
-        if (filterReasoningHistory) builder.defaultAdvisors(new GroqReasoningHistoryAdvisor());
+        if (environment.acceptsProfiles(Profiles.of("groq")) && filterReasoningHistory) builder.defaultAdvisors(new GroqReasoningHistoryAdvisor());
         return builder
                 .defaultSystem("""
                     Você é um assistente pessoal.

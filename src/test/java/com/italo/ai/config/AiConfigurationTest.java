@@ -25,12 +25,15 @@ class AiConfigurationTest {
                 .withBean(TimeTool.class, TimeTool::new)
                 .withBean(WebSearchTool.class, () -> new WebSearchTool(mock(BraveSearchService.class)));
 
-        for (boolean enabled : new boolean[]{false, true}) {
-            contextRunner.withPropertyValues("app.groq.reasoning-history-filter-enabled=" + enabled)
-                    .run(context -> {
-                        assertThat(context).hasNotFailed().hasSingleBean(ChatClient.class);
-                        assertThat(context.getBean(ChatClient.class)).isNotNull();
-                    });
+        for (String profile : new String[]{"groq", "ollama", "openai-compatible"}) {
+            for (boolean enabled : new boolean[]{false, true}) {
+                contextRunner.withInitializer(context -> context.getEnvironment().setActiveProfiles(profile))
+                        .withPropertyValues("app.groq.reasoning-history-filter-enabled=" + enabled)
+                        .run(context -> {
+                            assertThat(context).hasNotFailed().hasSingleBean(ChatClient.class);
+                            assertThat(context.getBean(ChatClient.class)).isNotNull();
+                        });
+            }
         }
     }
 }

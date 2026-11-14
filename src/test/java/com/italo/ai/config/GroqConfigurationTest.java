@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+@org.springframework.test.context.ActiveProfiles("groq")
 @SpringBootTest(properties = {
     "spring.datasource.url=jdbc:h2:mem:groq-config;DB_CLOSE_DELAY=-1",
     "spring.datasource.driver-class-name=org.h2.Driver",

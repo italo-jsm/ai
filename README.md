@@ -1,6 +1,6 @@
 # AI — ambiente local
 
-Requisitos: JDK 21, Docker com Compose, Ollama local para embeddings e acesso à Groq para chat.
+Requisitos: JDK 21, Docker com Compose, Ollama local para embeddings e um modelo de chat local ou acesso a um provedor de nuvem.
 
 1. Inicie o Docker e crie o banco PostgreSQL com pgvector:
 
@@ -19,76 +19,86 @@ Requisitos: JDK 21, Docker com Compose, Ollama local para embeddings e acesso à
    ```
 
    O modelo `nomic-embed-text` gera os embeddings de 768 dimensoes para o pgvector.
-   Não é necessário carregar um modelo de chat no Ollama para o uso normal.
+   Para chat local, prepare também `ollama pull qwen2.5:7b`.
+   Com chat na nuvem, o Ollama executa apenas embeddings.
    A aplicacao nao baixa modelos automaticamente.
 
-3. Configure as variáveis da Groq e inicie a aplicação:
+3. Escolha o provedor e inicie a aplicação (um perfil de provedor por execução):
 
    ```bash
+   # Local: padrão quando nenhum perfil é informado; não exige chave de nuvem.
+   SPRING_PROFILES_ACTIVE=ollama ./gradlew bootRun
+
+   # Groq: use um modelo disponível na conta com suporte a ferramentas.
    export GROQ_API_KEY='sua-chave'
    export GROQ_MODEL='openai/gpt-oss-20b'
-   ./gradlew bootRun
+   SPRING_PROFILES_ACTIVE=groq ./gradlew bootRun
+
+   # Outro serviço com API compatível com OpenAI.
+   export AI_BASE_URL='https://api.openai.com/v1'
+   export AI_API_KEY='sua-chave'
+   export AI_MODEL='seu-modelo'
+   SPRING_PROFILES_ACTIVE=openai-compatible ./gradlew bootRun
    ```
 
-   Use em `GROQ_MODEL` o identificador de um modelo disponível na sua conta
-   com suporte a tool calling. As duas variáveis são obrigatórias para o chat.
-   A aplicação não carrega arquivo `.env` automaticamente.
+   A aplicação não carrega `.env` automaticamente. Cada perfil exige somente
+   suas próprias variáveis. `OLLAMA_CHAT_MODEL` altera o modelo local (padrão
+   `qwen2.5:7b`). Sem perfil explícito, `./gradlew bootRun` usa Ollama.
+   Ao ativar outros perfis de ambiente, inclua também o perfil do provedor.
 
-O Ollama e acessado em `http://localhost:11434`. O Spring AI inicializa sua tabela
+Por padrão, o Ollama é acessado em `http://localhost:11434`. O Spring AI inicializa sua tabela
 vetorial; o Liquibase cria as tabelas de memória e o Hibernate valida o esquema.
 
 As variaveis `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` e `POSTGRES_PORT`
 podem ser exportadas no terminal antes de iniciar tanto o Compose quanto a aplicacao.
-`OLLAMA_BASE_URL` permite alterar o endereco do Ollama.
+`OLLAMA_BASE_URL` permite usar o Ollama em outra máquina. O endereço vale para
+chat local e embeddings, inclusive quando o chat usa Groq ou outro provedor:
+
+```bash
+OLLAMA_BASE_URL=http://192.168.1.100:11434 SPRING_PROFILES_ACTIVE=ollama ./gradlew bootRun
+```
+
+O servidor remoto deve estar acessível e ter os modelos necessários instalados.
+Sem `OLLAMA_BASE_URL`, o endereço continua sendo `http://localhost:11434`.
 
 Para parar o banco preservando os dados: `docker compose down`.
 
 
-### Chat na Groq e embeddings locais
+### Troca de provedor
 
-O adaptador `spring-ai-starter-model-openai` do Spring AI conecta à Groq por sua
-API compatível. O prefixo `openai` identifica o adaptador; as requisições vão
-para a URL Groq configurada:
+As configurações comuns ficam em `application.properties`. Os arquivos
+`application-ollama.properties`, `application-groq.properties` e
+`application-openai-compatible.properties` selecionam o adaptador e o modelo.
+Troque `SPRING_PROFILES_ACTIVE`, configure as variáveis do destino e reinicie.
+Não há troca durante uma requisição nem fallback automático entre provedores.
 
-```properties
-spring.ai.model.chat=openai
-spring.ai.openai.base-url=https://api.groq.com/openai/v1
-spring.ai.openai.api-key=${GROQ_API_KEY}
-spring.ai.openai.chat.model=${GROQ_MODEL}
-spring.ai.model.embedding=ollama
-spring.ai.ollama.embedding.model=nomic-embed-text
-```
+Chat e extração de memórias usam o mesmo modelo. Apenas o cliente de chat
+registra ferramentas de horário e busca; `BRAVE_API_KEY` continua separada.
+Escolha modelos que suportem chamadas de ferramentas e valide também a extração
+JSON. Compatibilidade de API não garante suporte a todas as opções de modelo.
+Provedores com outra API precisam de seu starter Spring AI e um novo perfil;
+os serviços continuam usando `ChatClient`.
 
-Chat e extração de memórias usam o modelo escolhido em `GROQ_MODEL`. Mensagens
-e memórias incluídas no contexto são enviadas à Groq. As ferramentas de horário
-e busca Brave permanecem disponíveis no chat; `BRAVE_API_KEY` continua separada.
+O perfil Groq usa o adaptador OpenAI com a base
+`https://api.groq.com/openai/v1`. No perfil genérico, `AI_BASE_URL` deve incluir
+o prefixo da API (por exemplo `/v1`), sem `/chat/completions`.
+Mensagens e memórias incluídas no contexto são enviadas ao provedor selecionado.
 
-O Ollama permanece necessário para indexar e buscar por embeddings.
-A troca do modelo de chat não altera o modelo vetorial, as 768 dimensões ou
-os registros existentes; não exige reindexação.
+Embeddings continuam no Ollama com `nomic-embed-text` e 768 dimensões,
+independentemente do chat. Trocar o chat não exige reindexação. Trocar o modelo
+de embeddings exige planejar a reindexação, mesmo mantendo a dimensão.
 
-Compatibilidade com modelos de raciocínio na Groq: o Spring AI 2.0.1 pode ler
-`reasoning` da resposta e reenviá-lo como `reasoning_content` no histórico,
-campo que a Groq rejeita com HTTP 400. A configuração abaixo habilita um advisor
-que remove somente o metadado `reasoningContent` de cópias das mensagens do
-assistente antes de cada chamada do modelo, inclusive após ferramentas:
+O filtro `GroqReasoningHistoryAdvisor` só é aplicado com o perfil `groq` e
+`app.groq.reasoning-history-filter-enabled=true` (padrão desse perfil).
+Ele remove `reasoningContent` de cópias do histórico antes de cada chamada,
+inclusive após ferramentas, evitando o campo rejeitado pela Groq no Spring AI
+2.0.1. Preserva conteúdo e ferramentas e não desliga o raciocínio do modelo.
+O fluxo usa chamadas síncronas `ChatClient.call()`.
 
-```properties
-app.groq.reasoning-history-filter-enabled=true
-```
-
-O conteúdo, as chamadas de ferramentas e seus resultados são preservados.
-Não desliga o raciocínio do modelo nem altera a resposta original.
-Essa compatibilidade é específica da Groq; desative a opção ao usar um provedor
-que exija o reenvio de raciocínio. O fluxo atual usa chamadas síncronas
-`ChatClient.call()`.
-
-`GroqConfigurationTest` verifica seleção dos provedores, endpoint compatível,
-autenticação com chave fictícia, execução de ferramenta e extração JSON.
-Usa H2 e servidor HTTP local, sem Groq, Ollama ou Brave reais:
+Testes de seleção e contrato sem provedores reais:
 
 ```bash
-./gradlew test --tests '*GroqConfigurationTest'
+./gradlew test --tests '*ProviderConfigurationTest' --tests '*GroqConfigurationTest' --tests '*AiConfigurationTest'
 ```
 
 ### Memórias do agente
