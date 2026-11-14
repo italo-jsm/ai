@@ -9,6 +9,11 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+    @ExceptionHandler(InvalidCredentialsException.class)
+    ProblemDetail unauthorized(InvalidCredentialsException failure) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, failure.getMessage());
+    }
+
     @ExceptionHandler(UserNotFoundException.class)
     ProblemDetail notFound(UserNotFoundException failure) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, failure.getMessage());

@@ -5,3 +5,9 @@ databaseChangeLog:
   - include:
       file: 002-users.yaml
       relativeToChangelogFile: true
+  - include:
+      file: 003-telegram-registration.sql
+      relativeToChangelogFile: true
+  - include:
+      file: 004-user-passwords.sql
+      relativeToChangelogFile: true

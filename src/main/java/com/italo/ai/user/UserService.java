@@ -13,8 +13,10 @@ public class UserService {
     }
 
     @Transactional
-    public UserEntity create(String username, Long telegramUserId) {
-        return users.saveAndFlush(new UserEntity(username, telegramUserId));
+    public UserEntity create(String username, Long telegramUserId, String password) {
+        var user = new UserEntity(username, telegramUserId);
+        user.setPasswordHash(Passwords.hash(password));
+        return users.saveAndFlush(user);
     }
 
     @Transactional(readOnly = true)
@@ -29,11 +31,26 @@ public class UserService {
     }
 
     @Transactional
-    public UserEntity linkTelegram(String username, Long telegramUserId) {
-        if (telegramUserId == null)
-            throw new IllegalArgumentException("Informe o ID do usuário do Telegram.");
-        var user = findByUsername(username);
+    public Optional<UserEntity> linkTelegram(String username, Long telegramUserId, String password) {
+        if (telegramUserId == null || telegramUserId <= 0)
+            throw new IllegalArgumentException("Informe um ID positivo do Telegram.");
+        var found = users.findForUpdate(UserEntity.normalizeUsername(username));
+        if (found.isEmpty()) {
+            Passwords.matches(password, null);
+            return Optional.empty();
+        }
+        var user = found.get();
+        if (user.isLoginLocked()) return Optional.empty();
+        if (!Passwords.matches(password, user.getPasswordHash())) {
+            user.recordLoginFailure();
+            return Optional.empty();
+        }
+        if (user.getTelegramUserId() != null && !user.getTelegramUserId().equals(telegramUserId))
+            return Optional.empty();
+        var linked = users.findByTelegramUserId(telegramUserId);
+        if (linked.isPresent() && !linked.get().getId().equals(user.getId())) return Optional.empty();
+        user.clearLoginFailures();
         user.setTelegramUserId(telegramUserId);
-        return users.saveAndFlush(user);
+        return Optional.of(users.saveAndFlush(user));
     }
 }

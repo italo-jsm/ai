@@ -50,8 +50,8 @@ class MemoryRagPostgresTest {
     private com.italo.ai.user.UserEntity other;
 
     @BeforeEach void prepareModel() {
-        owner = users.create("rag-test-" + UUID.randomUUID(), null);
-        other = users.create("rag-test-" + UUID.randomUUID(), null);
+        owner = users.create("rag-test-" + UUID.randomUUID(), null, "SenhaTeste123!");
+        other = users.create("rag-test-" + UUID.randomUUID(), null, "SenhaTeste123!");
         when(chatModel.getOptions()).thenReturn(org.springframework.ai.chat.prompt.ChatOptions.builder().build());
         when(chatModel.call(any(Prompt.class))).thenReturn(new ChatResponse(List.of(new Generation(new AssistantMessage("Resposta")))));
     }

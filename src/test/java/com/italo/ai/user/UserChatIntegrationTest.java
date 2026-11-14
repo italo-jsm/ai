@@ -44,12 +44,13 @@ class UserChatIntegrationTest {
     @MockitoBean ChatModel model;
     @MockitoBean MemoryExtractor extractor;
     @MockitoBean TelegramBotClient bot;
+    @MockitoBean TelegramRegistrationService registrations;
     @MockitoBean AsyncMemoryIndexingService indexer;
     @MockitoBean SemanticMemoryRetriever semantic;
 
     @Test void httpAndTelegramShareRegisteredUsersMemoriesWithoutMixingOwners() {
-        var user = users.create("italo", 5123456789L);
-        var other = users.create("outro", null);
+        var user = users.create("italo", 5123456789L, "SenhaTeste123!");
+        var other = users.create("outro", null, "SenhaTeste123!");
         memories.saveAndFlush(new MemoryEntity(other,
                 new MemoryCandidate(MemoryType.PREFERENCE, "usuário", "prefere", "chá secreto", null)));
         when(model.call(any(Prompt.class))).thenReturn(new ChatResponse(List.of(new Generation(new AssistantMessage("Resposta")))));

@@ -15,7 +15,8 @@ class TelegramConsumerTest {
     private final ChatService chat = mock(ChatService.class);
     private final TelegramBotClient bot = mock(TelegramBotClient.class);
     private final UserService users = mock(UserService.class);
-    private final TelegramConsumer consumer = new TelegramConsumer(chat, bot, users);
+    private final TelegramRegistrationService registrations = mock(TelegramRegistrationService.class);
+    private final TelegramConsumer consumer = new TelegramConsumer(chat, bot, users, registrations);
 
     @org.junit.jupiter.api.BeforeEach void registerUser() {
         when(users.findByTelegramUserId(5123456789L)).thenReturn(Optional.of(ALICE));
@@ -69,10 +70,11 @@ class TelegramConsumerTest {
     @Test void unknownTelegramUserReceivesRegistrationMessageWithoutCallingChat() {
         when(users.findByTelegramUserId(5123456789L)).thenReturn(Optional.empty());
 
+        when(registrations.handle(any())).thenReturn("Abra o bot e envie /start.");
         consumer.consume(update("Olá", false));
 
         verify(bot).sendMessage(-1001234567890L, 7L,
-                "Seu usuário do Telegram ainda não está cadastrado.");
+                "Abra o bot e envie /start.");
         verifyNoInteractions(chat);
     }
 }

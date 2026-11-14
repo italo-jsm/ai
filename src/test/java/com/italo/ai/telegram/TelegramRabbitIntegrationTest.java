@@ -40,7 +40,7 @@ class TelegramRabbitIntegrationTest {
         var users = mock(UserService.class);
         when(users.findByTelegramUserId(1234L)).thenReturn(java.util.Optional.of(ALICE));
         when(chat.chat(ALICE, "Teste isolado")).thenReturn("Resposta");
-        var consumer = spy(new TelegramConsumer(chat, bot, users));
+        var consumer = spy(new TelegramConsumer(chat, bot, users, mock(TelegramRegistrationService.class)));
         try (var context = new AnnotationConfigApplicationContext()) {
             context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("test",
                     Map.of("app.telegram.enabled", "true", "app.telegram.queue", queueName)));

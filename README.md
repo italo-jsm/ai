@@ -119,7 +119,7 @@ Cadastre o usuário antes de enviar mensagens. O chat recebe seu `username`:
 
 `POST /api/v1/chat` resolve o cadastro e usa seu UUID interno para buscar e salvar
 memórias. Usuário inexistente retorna `404`. As consultas SQL e vetoriais filtram
-pelo mesmo UUID. Não há autenticação neste MVP; o username identifica o cadastro,
+pelo mesmo UUID. O endpoint de chat HTTP ainda não exige autenticação; o username identifica o cadastro,
 mas não comprova a identidade de quem fez a chamada.
 
 As migrações ficam em `src/main/resources/db/changelog`. A tabela `memory` possui
@@ -348,8 +348,8 @@ Sem token configurado, o envio falha; não há token padrão embutido.
 
 O consumidor busca o cadastro por `message.from.id` em `app_user.telegram_user_id`,
 inclusive em grupos. O ID do chat serve apenas para enviar a resposta. Se não houver
-cadastro vinculado, responde "Seu usuário do Telegram ainda não está cadastrado.",
-sem chamar a IA nem salvar memórias. Somente novas mensagens com texto, remetente
+cadastro vinculado, orienta o usuário a cadastrar-se com `/start` ou vincular
+uma conta da web com `/entrar`, sem chamar a IA nem salvar memórias. Somente novas mensagens com texto, remetente
 e chat válidos são processadas; bots, edições e mídias sem texto são ignorados.
 Respostas são enviadas como texto simples, divididas em partes de até 4096
 caracteres sem separar pares Unicode de emojis.
@@ -369,7 +369,7 @@ Testes sem acesso ao Telegram real:
 
 ## Cadastro de usuários
 
-O cadastro usa apenas UUID interno, username único e ID opcional do Telegram.
+O cadastro usa UUID interno, username único, senha BCrypt e ID opcional do Telegram.
 O username é normalizado para minúsculas e sem espaços nas extremidades.
 O ID do Telegram deve ser positivo e só pode pertencer a um cadastro.
 
@@ -379,20 +379,21 @@ Criar usuário (`201 Created`):
 POST /api/v1/users
 Content-Type: application/json
 
-{"username":"italo","telegramUserId":5123456789}
+{"username":"italo","password":"UmaSenhaForte123!"}
 ```
 
-O campo `telegramUserId` pode ser omitido. Para vinculá-lo depois ou substituí-lo:
+O campo `password` é obrigatório. O campo `telegramUserId` é opcional.
+Para vincular depois, é necessário informar a senha da conta:
 
 ```http
 PUT /api/v1/users/italo/telegram
 Content-Type: application/json
 
-{"telegramUserId":5123456789}
+{"telegramUserId":5123456789,"password":"UmaSenhaForte123!"}
 ```
 
-Dados inválidos retornam `400`, usuário desconhecido `404` e username/Telegram
-já utilizado `409`. O vínculo não cria outro usuário nem muda o dono das memórias.
+Dados inválidos retornam `400`, credenciais inválidas ou conta indisponível `401`
+e conflitos de unicidade `409`. Um vínculo existente com outro ID não é substituído. O vínculo não cria outro usuário nem muda o dono das memórias.
 HTTP e Telegram compartilham as memórias do mesmo cadastro.
 
 ```mermaid
@@ -452,3 +453,63 @@ temporário, criado e removido pelo próprio teste:
 ```bash
 RUN_USER_MIGRATION_POSTGRES_TESTS=true ./gradlew test --tests '*UserMigrationTest'
 ```
+
+### Cadastro de usuários pelo Telegram (MVP)
+
+Em conversa privada, envie `/start` e informe nome completo, nome de usuário
+(3 a 32 letras, números ou `_`), senha e e-mail. A conta é criada após confirmar o
+código recebido por e-mail. Usuários existentes continuam usando o bot normalmente.
+
+- `/start`: iniciar ou retomar o cadastro salvo no banco.
+- `/cancelar`: apagar o rascunho; permite começar novamente para corrigir dados.
+- `/reenviar`: gerar outro código, com intervalo mínimo de 60 segundos.
+
+O código expira em 10 minutos e permite cinco tentativas. O reenvio bem-sucedido
+invalida o código anterior. Falhas de envio preservam o progresso e o código anterior.
+Nome de usuário, e-mail normalizado e ID do Telegram são únicos. Não há vinculação
+automática a contas existentes: a vinculação exige senha. Não há recuperação de conta neste MVP.
+
+Configure o SMTP por variáveis de ambiente:
+
+```dotenv
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=usuario
+SMTP_PASSWORD=senha
+SMTP_AUTH=true
+SMTP_STARTTLS=true
+REGISTRATION_MAIL_FROM=cadastro@example.com
+```
+
+Sem SMTP configurado, a aplicação inicia e atende usuários existentes, mas não
+consegue concluir novos cadastros. As tabelas e os novos campos são criados por
+Liquibase; contas anteriores mantêm nome completo e e-mail opcionais.
+
+### Vincular uma conta da web ao Telegram
+
+Em conversa privada com o bot:
+
+```text
+/entrar
+→ Informe seu nome de usuário da web.
+→ Informe sua senha.
+→ Conta vinculada ao Telegram! Pode enviar sua pergunta.
+```
+
+O ID usado é sempre `message.from.id`. O vínculo preserva UUID, dados e memórias
+da conta existente; não exige novo cadastro nem outra confirmação de e-mail.
+`/cancelar` interrompe o fluxo. Uma conta já vinculada a outro ID não é substituída.
+
+As novas contas, pela API ou pelo Telegram, exigem senha com no mínimo 8 caracteres
+e no máximo 72 bytes UTF-8. Somente hashes BCrypt com custo 12 são armazenados,
+inclusive no rascunho do cadastro. Espaços na senha são preservados. Cinco senhas
+incorretas bloqueiam a vinculação da conta por 15 minutos; cancelar o fluxo ou
+usar outro Telegram não remove o bloqueio. A senha não é encaminhada à IA.
+
+A migration `004-user-passwords.sql` preserva contas antigas com `password_hash`
+nulo, pois não existe senha anterior para converter. Essas contas continuam
+funcionando pelos vínculos existentes, mas não podem fazer uma nova vinculação
+até que um administrador provisione um hash BCrypt de uma senha definida pelo
+proprietário, por um canal confiável. Não há senha padrão nem endpoint público
+para definir senha de uma conta antiga. Recuperação e provisionamento por e-mail
+ficam fora deste MVP.
