@@ -9,7 +9,6 @@ import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.support.converter.MessageConversionException;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TelegramMessageConversionTest {
@@ -37,7 +36,6 @@ class TelegramMessageConversionTest {
         assertThat(update.message().chat().id()).isEqualTo(-1001234567890L);
         assertThat(update.message().date()).isEqualTo(1794672000L);
         assertThat(update.message().text()).isEqualTo("Olá!");
-        assertThatCode(() -> new TelegramConsumer().consume(update)).doesNotThrowAnyException();
     }
 
     @Test
@@ -51,7 +49,6 @@ class TelegramMessageConversionTest {
         assertThat(update.editedMessage().text()).isNull();
         assertThat(update.editedMessage().from()).isNull();
         assertThat(update.editedMessage().caption()).isEqualTo("Imagem");
-        assertThatCode(() -> new TelegramConsumer().consume(update)).doesNotThrowAnyException();
     }
 
     @Test

@@ -1,4 +1,4 @@
-package com.italo.ai.api;
+package com.italo.ai.chat;
 
 import com.italo.ai.memory.model.*;
 import com.italo.ai.memory.persistence.MemoryEntity;
@@ -14,7 +14,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-class ChatControllerMemoryTest {
+class ChatServiceTest {
     @Test void includesSavedMemoriesAndPreservesDefaultSystemInstructions() {
         var model = mock(ChatModel.class);
         when(model.getOptions()).thenReturn(org.springframework.ai.chat.prompt.ChatOptions.builder().build());
@@ -26,8 +26,8 @@ class ChatControllerMemoryTest {
         var extraction = new MemoryExtraction(List.of());
         when(extractor.extract("Sugira uma bebida")).thenReturn(extraction);
         var memoryService = mock(MemoryService.class);
-        var controller = new ChatController(client, extractor, memoryService, context, mock(AsyncMemoryIndexingService.class));
-        assertThat(controller.chat(new ChatController.ChatRequest("alice", "Sugira uma bebida")).response()).isEqualTo("Resposta");
+        var service = new ChatService(client, extractor, memoryService, context, mock(AsyncMemoryIndexingService.class));
+        assertThat(service.chat("alice", "Sugira uma bebida")).isEqualTo("Resposta");
         var prompt = ArgumentCaptor.forClass(Prompt.class);
         verify(model).call(prompt.capture());
         assertThat(prompt.getValue().getInstructions()).extracting(message -> message.getText())
@@ -39,7 +39,7 @@ class ChatControllerMemoryTest {
         var fixture = new Fixture();
         var saved = new MemoryEntity("alice", new MemoryCandidate(MemoryType.PREFERENCE, "usuário", "prefere", "café", null));
         when(fixture.memories.save("alice", fixture.extraction)).thenReturn(List.of(saved));
-        assertThat(fixture.controller.chat(new ChatController.ChatRequest("alice", "mensagem")).response()).isEqualTo("Resposta");
+        assertThat(fixture.service.chat("alice", "mensagem")).isEqualTo("Resposta");
         var order = inOrder(fixture.memories, fixture.indexer);
         order.verify(fixture.memories).save("alice", fixture.extraction);
         @SuppressWarnings("unchecked")
@@ -53,13 +53,13 @@ class ChatControllerMemoryTest {
     @Test void submissionFailureStillReturnsGeneratedAnswer() {
         var fixture = new Fixture();
         doThrow(new IllegalStateException("offline")).when(fixture.indexer).index(anyList());
-        assertThat(fixture.controller.chat(new ChatController.ChatRequest("alice", "mensagem")).response()).isEqualTo("Resposta");
+        assertThat(fixture.service.chat("alice", "mensagem")).isEqualTo("Resposta");
         verify(fixture.indexer, times(1)).index(anyList());
     }
     @Test void saveFailureDoesNotIndexOrHideError() {
         var fixture = new Fixture();
         when(fixture.memories.save("alice", fixture.extraction)).thenThrow(new IllegalStateException("save failed"));
-        assertThatThrownBy(() -> fixture.controller.chat(new ChatController.ChatRequest("alice", "mensagem")))
+        assertThatThrownBy(() -> fixture.service.chat("alice", "mensagem"))
             .isInstanceOf(IllegalStateException.class).hasMessage("save failed");
         verifyNoInteractions(fixture.indexer);
     }
@@ -67,7 +67,7 @@ class ChatControllerMemoryTest {
         final MemoryService memories = mock(MemoryService.class);
         final AsyncMemoryIndexingService indexer = mock(AsyncMemoryIndexingService.class);
         final MemoryExtraction extraction = new MemoryExtraction(List.of());
-        final ChatController controller;
+        final ChatService service;
         Fixture() {
             var model = mock(ChatModel.class);
             when(model.getOptions()).thenReturn(org.springframework.ai.chat.prompt.ChatOptions.builder().build());
@@ -76,7 +76,7 @@ class ChatControllerMemoryTest {
             when(context.contextFor("alice", "mensagem")).thenReturn("");
             var extractor = mock(MemoryExtractor.class);
             when(extractor.extract("mensagem")).thenReturn(extraction);
-            controller = new ChatController(ChatClient.builder(model).build(), extractor, memories, context, indexer);
+            service = new ChatService(ChatClient.builder(model).build(), extractor, memories, context, indexer);
         }
     }
 }

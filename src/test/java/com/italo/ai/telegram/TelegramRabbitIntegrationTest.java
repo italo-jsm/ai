@@ -21,6 +21,9 @@ import org.springframework.core.env.MapPropertySource;
 
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import com.italo.ai.chat.ChatService;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 
@@ -30,7 +33,10 @@ class TelegramRabbitIntegrationTest {
     @Test
     void consumesJsonThroughAnnotatedListenerOnIsolatedQueue() {
         String queueName = "ai.telegram.test." + UUID.randomUUID();
-        var consumer = spy(new TelegramConsumer());
+        var chat = mock(ChatService.class);
+        var bot = mock(TelegramBotClient.class);
+        when(chat.chat("telegram:1234", "Teste isolado")).thenReturn("Resposta");
+        var consumer = spy(new TelegramConsumer(chat, bot));
         try (var context = new AnnotationConfigApplicationContext()) {
             context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("test",
                     Map.of("app.telegram.enabled", "true", "app.telegram.queue", queueName)));
@@ -58,7 +64,7 @@ class TelegramRabbitIntegrationTest {
             properties.setContentType(MessageProperties.CONTENT_TYPE_JSON);
             var body = """
                     {"update_id":123,"message":{"message_id":7,
-                    "chat":{"id":9876543210,"type":"private"},"text":"Teste isolado"}}
+                    "from":{"id":1234,"is_bot":false},"chat":{"id":9876543210,"type":"private"},"text":"Teste isolado"}}
                     """;
             new RabbitTemplate(context.getBean(CachingConnectionFactory.class))
                     .send("", queueName, new Message(body.getBytes(StandardCharsets.UTF_8), properties));
@@ -66,6 +72,7 @@ class TelegramRabbitIntegrationTest {
             verify(consumer, timeout(10000)).consume(argThat((TelegramUpdate update) ->
                     update.updateId() == 123L && update.message().chat().id() == 9876543210L
                             && "Teste isolado".equals(update.message().text())));
+            verify(bot, timeout(10000)).sendMessage(9876543210L, 7L, "Resposta");
         }
     }
 
