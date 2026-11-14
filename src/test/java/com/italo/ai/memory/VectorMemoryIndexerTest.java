@@ -1,5 +1,7 @@
 package com.italo.ai.memory;
 
+import static com.italo.ai.support.TestUsers.*;
+
 import com.italo.ai.memory.indexing.VectorMemoryIndexer;
 import com.italo.ai.memory.model.MemoryType;
 import com.italo.ai.memory.service.*;
@@ -15,7 +17,7 @@ import static org.mockito.Mockito.*;
 class VectorMemoryIndexerTest {
     @Test void indexesSqlIdentityOwnerAndNegationWithoutInternalFields() {
         var store = mock(VectorStore.class);
-        var memory = new MemoryService.MemoryView(UUID.randomUUID(), "alice", Instant.now(),
+        var memory = new MemoryService.MemoryView(UUID.randomUUID(), ALICE.getId(), Instant.now(),
             MemoryType.PREFERENCE, "café", "DISLIKE", "true", "motivo privado");
         new VectorMemoryIndexer(store, new MemoryTextFormatter()).index(List.of(memory));
         @SuppressWarnings("unchecked")
@@ -24,7 +26,7 @@ class VectorMemoryIndexerTest {
         assertThat(documents.getValue()).singleElement().satisfies(document -> {
             assertThat(document.getId()).isEqualTo(memory.id().toString());
             assertThat(document.getText()).contains("não gosta de café").doesNotContain("motivo privado", memory.id().toString());
-            assertThat(document.getMetadata()).containsEntry("userId", "alice")
+            assertThat(document.getMetadata()).containsEntry("userId", ALICE.getId().toString())
                 .containsEntry("kind", "memory").containsEntry("type", "PREFERENCE");
         });
     }

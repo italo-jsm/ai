@@ -1,5 +1,6 @@
 package com.italo.ai.memory.retrieval;
 
+import java.util.UUID;
 import com.italo.ai.memory.persistence.MemoryRepository;
 import com.italo.ai.memory.service.MemoryService.MemoryView;
 import org.springframework.data.domain.PageRequest;
@@ -13,7 +14,7 @@ public class SqlMemoryRetriever implements MemoryRetriever {
     }
 
     @Override
-    public List<MemoryView> retrieve(String userId, String message, int limit) {
+    public List<MemoryView> retrieve(UUID userId, String message, int limit) {
         MemoryRetriever.validate(userId, message, limit);
         return memories.search(userId, null, null, null, null, PageRequest.of(0, limit))
             .map(MemoryView::from).getContent();

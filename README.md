@@ -101,26 +101,20 @@ A migração inicial cria diretamente a tabela `memory`, com usuário e data.
 A busca semântica consulta o pgvector. O chat pode indexar novas memórias após o
 commit SQL quando a indexação está habilitada.
 
-Envie o identificador do usuário no chat:
+Cadastre o usuário antes de enviar mensagens. O chat recebe seu `username`:
 
 ```json
-{"userId":"italo","message":"Prefiro café sem açúcar."}
+{"username":"italo","message":"Prefiro café sem açúcar."}
 ```
 
-- `POST /api/v1/chat`: responde e salva a extração.
-- `GET /api/v1/memories?userId=italo&type=PREFERENCE&page=0&size=20`: busca paginada.
-- Filtros opcionais: `subject` e `predicate` por igualdade; `text` procura trechos
-  do valor, sem distinguir maiúsculas e minúsculas. `size`: 1 a 100.
-- `GET /api/v1/memories/semantic?userId=italo&query=gostos%20alimentares&limit=10`:
-  busca por significado, em ordem de relevância. `limit`: 1 a 100.
+`POST /api/v1/chat` resolve o cadastro e usa seu UUID interno para buscar e salvar
+memórias. Usuário inexistente retorna `404`. As consultas SQL e vetoriais filtram
+pelo mesmo UUID. Não há autenticação neste MVP; o username identifica o cadastro,
+mas não comprova a identidade de quem fez a chamada.
 
-Todas as consultas filtram pelo usuário. O projeto ainda não possui autenticação:
-`userId` é informado pelo cliente e **não comprova identidade**. Ao adicionar login,
-obtenha esse identificador da sessão autenticada.
-
-As migrações ficam em `src/main/resources/db/changelog`. A tabela vetorial continua
-sendo inicializada pelo Spring AI. A tabela `memory` não possui índices adicionais. A busca por significado usa o
-índice HNSW da tabela vetorial do Spring AI.
+As migrações ficam em `src/main/resources/db/changelog`. A tabela `memory` possui
+uma FK obrigatória para `app_user` e um índice em `user_id`. A tabela vetorial
+continua sendo inicializada pelo Spring AI e usa índice HNSW.
 
 Testes de persistência e serviço, sem Ollama nem PostgreSQL:
 
@@ -299,7 +293,7 @@ Contrato do provedor: [Brave Web Search API](https://api-dashboard.search.brave.
 Com `BRAVE_API_KEY` configurada, use o endpoint de chat existente:
 
 ```json
-{"userId":"italo","message":"Pesquise na internet quem foi Fernando da Gata e cite as fontes."}
+{"username":"italo","message":"Pesquise na internet quem foi Fernando da Gata e cite as fontes."}
 ```
 
 A ferramenta `searchWeb(query)` recebe somente o termo de pesquisa. A chave,
@@ -325,4 +319,126 @@ Brave real:
 
 ```bash
 ./gradlew test --tests '*WebSearchToolTest'
+```
+
+## Respostas do bot no Telegram
+
+O `TelegramConsumer` lê updates da fila, chama `ChatService.chat(user, message)`
+e envia a resposta pela Bot API (`sendMessage`), no chat de origem e em resposta
+à mensagem recebida. Configure o token do mesmo bot usado pelo webhook:
+
+```bash
+export TELEGRAM_BOT_TOKEN='<token do bot>'
+```
+
+O consumidor usa `TELEGRAM_CONSUMER_ENABLED` (padrão `true`) e `TELEGRAM_QUEUE`
+(padrão `telegram_updates`). O envio usa `app.telegram.base-url`
+(padrão `https://api.telegram.org`) e `app.telegram.timeout` (padrão `10s`).
+Sem token configurado, o envio falha; não há token padrão embutido.
+
+O consumidor busca o cadastro por `message.from.id` em `app_user.telegram_user_id`,
+inclusive em grupos. O ID do chat serve apenas para enviar a resposta. Se não houver
+cadastro vinculado, responde "Seu usuário do Telegram ainda não está cadastrado.",
+sem chamar a IA nem salvar memórias. Somente novas mensagens com texto, remetente
+e chat válidos são processadas; bots, edições e mídias sem texto são ignorados.
+Respostas são enviadas como texto simples, divididas em partes de até 4096
+caracteres sem separar pares Unicode de emojis.
+
+Falhas de processamento ou envio rejeitam a entrega sem requeue automático,
+para evitar um ciclo de chamadas à IA. Se a fila tiver uma dead-letter exchange,
+a entrega seguirá para ela; caso contrário, será descartada. Não há garantia de
+envio exatamente uma vez: redelivery após queda ou envio parcial pode duplicar
+respostas. Os logs não incluem texto, token nem detalhes dos erros HTTP.
+
+Testes sem acesso ao Telegram real:
+
+```bash
+./gradlew test --tests '*TelegramConsumerTest' --tests '*TelegramBotClientTest' --tests '*TelegramMessageConversionTest'
+```
+
+
+## Cadastro de usuários
+
+O cadastro usa apenas UUID interno, username único e ID opcional do Telegram.
+O username é normalizado para minúsculas e sem espaços nas extremidades.
+O ID do Telegram deve ser positivo e só pode pertencer a um cadastro.
+
+Criar usuário (`201 Created`):
+
+```http
+POST /api/v1/users
+Content-Type: application/json
+
+{"username":"italo","telegramUserId":5123456789}
+```
+
+O campo `telegramUserId` pode ser omitido. Para vinculá-lo depois ou substituí-lo:
+
+```http
+PUT /api/v1/users/italo/telegram
+Content-Type: application/json
+
+{"telegramUserId":5123456789}
+```
+
+Dados inválidos retornam `400`, usuário desconhecido `404` e username/Telegram
+já utilizado `409`. O vínculo não cria outro usuário nem muda o dono das memórias.
+HTTP e Telegram compartilham as memórias do mesmo cadastro.
+
+```mermaid
+erDiagram
+    APP_USER ||--o{ MEMORY : possui
+    APP_USER {
+        uuid id PK
+        varchar username UK
+        bigint telegram_user_id UK "Opcional"
+    }
+    MEMORY {
+        uuid id PK
+        uuid user_id FK
+        timestamp created_at
+        varchar type
+        text subject
+        text predicate
+        text memory_value
+        text reason
+    }
+```
+
+### Migração dos cadastros antigos
+
+O changeset `002-users.yaml` roda na próxima inicialização e preserva os IDs e o
+conteúdo das memórias. Cada identificador antigo distinto recebe um cadastro:
+
+- `italo` vira o username `italo`, com UUID interno novo.
+- `telegram:5123456789` vira `telegram_5123456789`, já vinculado ao ID do Telegram.
+- Todas as memórias de um mesmo identificador continuam juntas.
+- Os metadados `userId` dos vetores existentes passam a usar o UUID do cadastro,
+  preservando o restante dos metadados e os embeddings.
+
+Identificadores antigos diferentes não são unidos automaticamente. Se `italo` e
+`telegram:5123456789` representam a mesma pessoa, faça o mapeamento explícito antes
+da migração (exemplo para executar apenas se esses forem os seus identificadores):
+
+```sql
+UPDATE memory SET user_id = 'italo' WHERE user_id = 'telegram:5123456789';
+```
+
+Depois da migração, vincule esse ID ao cadastro `italo` pelo endpoint `PUT`.
+Os vetores são atualizados pelo ID da memória, portanto acompanham esse mapeamento.
+Sem mapeamento prévio, os dois cadastros permanecem separados. A migração interrompe
+antes de alterar as tabelas se houver usernames vazios ou colisões após normalizar
+nomes, como `Italo` e `italo`; resolva explicitamente esses identificadores antigos.
+
+Testes do cadastro, da migração e do uso compartilhado das memórias:
+
+```bash
+./gradlew test --tests '*User*Test' --tests '*ChatControllerTest' --tests '*TelegramConsumerTest'
+```
+
+Para validar também a migração PostgreSQL e os metadados vetoriais em um schema
+temporário, criado e removido pelo próprio teste:
+
+```bash
+RUN_USER_MIGRATION_POSTGRES_TESTS=true ./gradlew test --tests '*UserMigrationTest'
 ```

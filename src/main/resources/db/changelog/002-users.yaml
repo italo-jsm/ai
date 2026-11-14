@@ -1,0 +1,130 @@
+databaseChangeLog:
+  - changeSet:
+      id: 002-users
+      author: codex
+      preConditions:
+        - onFail: HALT
+        - onFailMessage: "Normalize e mapeie os proprietários antigos antes de migrar: existem usernames vazios ou conflitantes."
+        - sqlCheck:
+            expectedResult: "0"
+            sql: >-
+              SELECT COUNT(*) FROM (
+                SELECT CASE WHEN REGEXP_LIKE(user_id, '^telegram:[1-9][0-9]*$')
+                  THEN 'telegram_' || SUBSTRING(user_id, 10)
+                  ELSE LOWER(TRIM(user_id)) END AS username
+                FROM (SELECT DISTINCT user_id FROM memory) owners
+                GROUP BY CASE WHEN REGEXP_LIKE(user_id, '^telegram:[1-9][0-9]*$')
+                  THEN 'telegram_' || SUBSTRING(user_id, 10)
+                  ELSE LOWER(TRIM(user_id)) END
+                HAVING COUNT(*) > 1 OR LOWER(TRIM(MIN(user_id))) = ''
+              ) conflicts
+      changes:
+        - createTable:
+            tableName: app_user
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: username
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+                    unique: true
+                    uniqueConstraintName: uk_app_user_username
+              - column:
+                  name: telegram_user_id
+                  type: bigint
+                  constraints:
+                    unique: true
+                    uniqueConstraintName: uk_app_user_telegram
+        - createTable:
+            tableName: legacy_memory_owner
+            columns:
+              - column:
+                  name: legacy_id
+                  type: varchar(255)
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: user_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+        - sql:
+            dbms: postgresql
+            sql: >-
+              INSERT INTO legacy_memory_owner (legacy_id, user_id)
+              SELECT user_id, gen_random_uuid() FROM memory GROUP BY user_id
+        - sql:
+            dbms: h2
+            sql: >-
+              INSERT INTO legacy_memory_owner (legacy_id, user_id)
+              SELECT user_id, random_uuid() FROM memory GROUP BY user_id
+        - sql:
+            sql: >-
+              INSERT INTO app_user (id, username, telegram_user_id)
+              SELECT user_id,
+                CASE WHEN REGEXP_LIKE(legacy_id, '^telegram:[1-9][0-9]*$')
+                  THEN 'telegram_' || SUBSTRING(legacy_id, 10)
+                  ELSE LOWER(TRIM(legacy_id)) END,
+                CASE WHEN REGEXP_LIKE(legacy_id, '^telegram:[1-9][0-9]*$')
+                  THEN CAST(SUBSTRING(legacy_id, 10) AS BIGINT)
+                  ELSE NULL END
+              FROM legacy_memory_owner
+        - addColumn:
+            tableName: memory
+            columns:
+              - column:
+                  name: registered_user_id
+                  type: uuid
+        - sql:
+            sql: >-
+              UPDATE memory SET registered_user_id =
+              (SELECT user_id FROM legacy_memory_owner WHERE legacy_id = memory.user_id)
+        - dropColumn:
+            tableName: memory
+            columnName: user_id
+        - renameColumn:
+            tableName: memory
+            oldColumnName: registered_user_id
+            newColumnName: user_id
+            columnDataType: uuid
+        - addNotNullConstraint:
+            tableName: memory
+            columnName: user_id
+            columnDataType: uuid
+        - addForeignKeyConstraint:
+            baseTableName: memory
+            baseColumnNames: user_id
+            referencedTableName: app_user
+            referencedColumnNames: id
+            constraintName: fk_memory_user
+        - createIndex:
+            tableName: memory
+            indexName: idx_memory_user
+            columns:
+              - column:
+                  name: user_id
+        - dropTable:
+            tableName: legacy_memory_owner
+  - changeSet:
+      id: 002-users-vector-owners
+      author: codex
+      preConditions:
+        - onFail: MARK_RAN
+        - dbms:
+            type: postgresql
+        - tableExists:
+            tableName: vector_store
+      changes:
+        - sql:
+            sql: >-
+              UPDATE vector_store v
+              SET metadata = jsonb_set(COALESCE(v.metadata::jsonb, '{}'::jsonb),
+                '{userId}', to_jsonb(m.user_id::text))
+              FROM memory m WHERE v.id = m.id

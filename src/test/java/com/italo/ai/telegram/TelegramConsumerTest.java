@@ -1,6 +1,9 @@
 package com.italo.ai.telegram;
 
 import com.italo.ai.chat.ChatService;
+import com.italo.ai.user.UserService;
+import static com.italo.ai.support.TestUsers.ALICE;
+import java.util.Optional;
 import com.italo.ai.telegram.model.TelegramUpdate;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.AmqpRejectAndDontRequeueException;
@@ -11,15 +14,20 @@ import static org.mockito.Mockito.*;
 class TelegramConsumerTest {
     private final ChatService chat = mock(ChatService.class);
     private final TelegramBotClient bot = mock(TelegramBotClient.class);
-    private final TelegramConsumer consumer = new TelegramConsumer(chat, bot);
+    private final UserService users = mock(UserService.class);
+    private final TelegramConsumer consumer = new TelegramConsumer(chat, bot, users);
+
+    @org.junit.jupiter.api.BeforeEach void registerUser() {
+        when(users.findByTelegramUserId(5123456789L)).thenReturn(Optional.of(ALICE));
+    }
 
     @Test void answersInOriginChatUsingSenderIdentity() {
-        when(chat.chat("telegram:5123456789", "Olá")).thenReturn("Oi!");
+        when(chat.chat(ALICE, "Olá")).thenReturn("Oi!");
 
         consumer.consume(update("Olá", false));
 
         var order = inOrder(chat, bot);
-        order.verify(chat).chat("telegram:5123456789", "Olá");
+        order.verify(chat).chat(ALICE, "Olá");
         order.verify(bot).sendMessage(-1001234567890L, 7L, "Oi!");
     }
 
@@ -31,11 +39,11 @@ class TelegramConsumerTest {
         consumer.consume(new TelegramUpdate(1L,
                 new TelegramUpdate.Message(7L, null, null, null, "Anônima", null), null, null, null));
 
-        verifyNoInteractions(chat, bot);
+        verifyNoInteractions(chat, bot, users);
     }
 
     @Test void rejectsProcessingFailureWithoutRequeueOrLeakingCause() {
-        when(chat.chat(anyString(), anyString())).thenThrow(new IllegalStateException("segredo"));
+        when(chat.chat(any(), anyString())).thenThrow(new IllegalStateException("segredo"));
 
         assertThatThrownBy(() -> consumer.consume(update("Olá", false)))
                 .isInstanceOf(AmqpRejectAndDontRequeueException.class)
@@ -44,12 +52,12 @@ class TelegramConsumerTest {
     }
 
     @Test void rejectsSendFailureWithoutRegeneratingAnswer() {
-        when(chat.chat(anyString(), anyString())).thenReturn("Oi!");
+        when(chat.chat(any(), anyString())).thenReturn("Oi!");
         doThrow(new IllegalStateException("token secreto")).when(bot).sendMessage(anyLong(), anyLong(), anyString());
 
         assertThatThrownBy(() -> consumer.consume(update("Olá", false)))
                 .isInstanceOf(AmqpRejectAndDontRequeueException.class).hasNoCause();
-        verify(chat).chat("telegram:5123456789", "Olá");
+        verify(chat).chat(ALICE, "Olá");
     }
 
     private TelegramUpdate update(String text, boolean isBot) {
@@ -57,5 +65,14 @@ class TelegramConsumerTest {
         var group = new TelegramUpdate.Chat(-1001234567890L, "supergroup", null, null, null, null);
         var message = new TelegramUpdate.Message(7L, from, group, null, text, null);
         return new TelegramUpdate(42L, message, null, null, null);
+    }
+    @Test void unknownTelegramUserReceivesRegistrationMessageWithoutCallingChat() {
+        when(users.findByTelegramUserId(5123456789L)).thenReturn(Optional.empty());
+
+        consumer.consume(update("Olá", false));
+
+        verify(bot).sendMessage(-1001234567890L, 7L,
+                "Seu usuário do Telegram ainda não está cadastrado.");
+        verifyNoInteractions(chat);
     }
 }

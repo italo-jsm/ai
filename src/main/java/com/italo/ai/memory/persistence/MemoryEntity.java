@@ -1,6 +1,7 @@
 package com.italo.ai.memory.persistence;
 
 import com.italo.ai.memory.model.*;
+import com.italo.ai.user.UserEntity;
 import jakarta.persistence.*;
 import java.util.*;
 import java.time.Instant;
@@ -9,7 +10,9 @@ import java.time.Instant;
 @Table(name = "memory")
 public class MemoryEntity {
     @Id private UUID id;
-    @Column(name = "user_id", nullable = false, length = 255) private String userId;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "user_id", nullable = false)
+    private UserEntity user;
     @Column(name = "created_at", nullable = false) private Instant createdAt;
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32) private MemoryType type;
@@ -19,11 +22,9 @@ public class MemoryEntity {
     @Column(columnDefinition = "text") private String reason;
 
     protected MemoryEntity() {}
-    public MemoryEntity(String userId, MemoryCandidate candidate) {
-        if (userId == null || userId.isBlank() || userId.length() > 255)
-            throw new IllegalArgumentException("userId deve conter entre 1 e 255 caracteres");
+    public MemoryEntity(UserEntity user, MemoryCandidate candidate) {
         this.id = UUID.randomUUID();
-        this.userId = userId;
+        this.user = Objects.requireNonNull(user, "user");
         this.createdAt = Instant.now();
         this.type = Objects.requireNonNull(candidate.type(), "type");
         this.subject = Objects.requireNonNull(candidate.subject(), "subject");
@@ -32,7 +33,8 @@ public class MemoryEntity {
         this.reason = candidate.reason();
     }
     public UUID getId() { return id; }
-    public String getUserId() { return userId; }
+    public UUID getUserId() { return user.getId(); }
+    public UserEntity getUser() { return user; }
     public Instant getCreatedAt() { return createdAt; }
     public MemoryType getType() { return type; }
     public String getSubject() { return subject; }

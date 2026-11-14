@@ -20,7 +20,7 @@ public class VectorMemoryIndexer implements MemoryIndexer {
         if (memories.isEmpty()) return;
         var documents = memories.stream().map(memory -> Document.builder()
             .id(memory.id().toString()).text(formatter.format(memory))
-            .metadata(Map.of("userId", memory.userId(), "kind", "memory", "type", memory.type().name()))
+            .metadata(Map.of("userId", memory.userId().toString(), "kind", "memory", "type", memory.type().name()))
             .build()).toList();
         vectors.add(documents);
     }

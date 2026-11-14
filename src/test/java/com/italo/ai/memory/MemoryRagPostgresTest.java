@@ -35,6 +35,7 @@ import static org.mockito.Mockito.*;
 @EnabledIfEnvironmentVariable(named = "RUN_RAG_POSTGRES_TESTS", matches = "true")
 class MemoryRagPostgresTest {
     @Autowired ChatController controller;
+    @Autowired com.italo.ai.user.UserService users;
     @Autowired MemoryService memories;
     @Autowired VectorStore vectors;
     @Autowired JdbcTemplate jdbc;
@@ -45,10 +46,12 @@ class MemoryRagPostgresTest {
 
     private CompletableFuture<Void> indexingFinished;
 
-    private final String owner = "rag-test-" + UUID.randomUUID();
-    private final String other = "rag-test-" + UUID.randomUUID();
+    private com.italo.ai.user.UserEntity owner;
+    private com.italo.ai.user.UserEntity other;
 
     @BeforeEach void prepareModel() {
+        owner = users.create("rag-test-" + UUID.randomUUID(), null);
+        other = users.create("rag-test-" + UUID.randomUUID(), null);
         when(chatModel.getOptions()).thenReturn(org.springframework.ai.chat.prompt.ChatOptions.builder().build());
         when(chatModel.call(any(Prompt.class))).thenReturn(new ChatResponse(List.of(new Generation(new AssistantMessage("Resposta")))));
     }
@@ -56,8 +59,9 @@ class MemoryRagPostgresTest {
     @AfterEach void cleanup() throws Exception {
         if (indexingFinished != null)
             indexingFinished.handle((result, failure) -> null).get(30, TimeUnit.SECONDS);
-        jdbc.update("delete from vector_store where metadata->>'userId' in (?, ?)", owner, other);
-        jdbc.update("delete from memory where user_id in (?, ?)", owner, other);
+        jdbc.update("delete from vector_store where metadata->>'userId' in (?, ?)", owner.getId().toString(), other.getId().toString());
+        jdbc.update("delete from memory where user_id in (?, ?)", owner.getId(), other.getId());
+        jdbc.update("delete from app_user where id in (?, ?)", owner.getId(), other.getId());
     }
 
     @Test void commitsBeforeIndexingAndRetrievesOwnedSqlContentWithoutDuplicateVectors() throws Exception {
@@ -85,9 +89,9 @@ class MemoryRagPostgresTest {
                 throw failure;
             }
         }).when(indexer).index(anyList());
-        assertThat(controller.chat(new ChatController.ChatRequest(owner, "Prefiro café sem açúcar")).response()).isEqualTo("Resposta");
+        assertThat(controller.chat(new ChatController.ChatRequest(owner.getUsername(), "Prefiro café sem açúcar")).response()).isEqualTo("Resposta");
         indexed.get(5, TimeUnit.SECONDS);
-        var saved = memories.semanticSearch(owner, "bebida", 20);
+        var saved = memories.semanticSearch(owner.getId(), "bebida", 20);
         assertThat(saved).singleElement().satisfies(memory -> assertThat(memory.value()).isEqualTo("café sem açúcar"));
         var id = saved.getFirst().id();
 
@@ -98,11 +102,11 @@ class MemoryRagPostgresTest {
 
         // Vector content may be stale; only the official SQL record enters the context.
         vectors.add(List.of(Document.builder().id(id.toString()).text("café: texto vetorial divergente")
-            .metadata(Map.of("userId", owner, "kind", "memory")).build()));
-        assertThat(memories.semanticSearch(owner, "bebida", 20)).extracting(MemoryService.MemoryView::value)
+            .metadata(Map.of("userId", owner.getId().toString(), "kind", "memory")).build()));
+        assertThat(memories.semanticSearch(owner.getId(), "bebida", 20)).extracting(MemoryService.MemoryView::value)
             .containsExactly("café sem açúcar");
-        assertThat(memories.semanticSearch(other, "bebida", 20)).extracting(MemoryService.MemoryView::userId)
-            .containsOnly(other);
+        assertThat(memories.semanticSearch(other.getId(), "bebida", 20)).extracting(MemoryService.MemoryView::userId)
+            .containsOnly(other.getId());
     }
 
     @Test void indexingFailureLeavesCommittedMemoryAndReturnsAnswer() throws Exception {
@@ -112,10 +116,10 @@ class MemoryRagPostgresTest {
             attempted.complete(null);
             throw new IllegalStateException("offline");
         }).when(indexer).index(anyList());
-        assertThat(controller.chat(new ChatController.ChatRequest(owner, "Prefiro café")).response()).isEqualTo("Resposta");
+        assertThat(controller.chat(new ChatController.ChatRequest(owner.getUsername(), "Prefiro café")).response()).isEqualTo("Resposta");
         attempted.get(5, TimeUnit.SECONDS);
-        assertThat(jdbc.queryForObject("select count(*) from memory where user_id = ?", Integer.class, owner)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from vector_store where metadata->>'userId' = ?", Integer.class, owner)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from memory where user_id = ?", Integer.class, owner.getId())).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from vector_store where metadata->>'userId' = ?", Integer.class, owner.getId().toString())).isZero();
     }
 
     private MemoryExtraction preference(String value) {

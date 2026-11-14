@@ -1,5 +1,7 @@
 package com.italo.ai.memory;
 
+import static com.italo.ai.support.TestUsers.*;
+
 import com.italo.ai.memory.indexing.*;
 import com.italo.ai.memory.model.MemoryType;
 import com.italo.ai.memory.service.MemoryService.MemoryView;
@@ -20,7 +22,7 @@ class AsyncMemoryIndexingServiceTest {
         var release = new CountDownLatch(1);
         var worker = new AtomicReference<Thread>();
         var indexer = mock(MemoryIndexer.class);
-        var memory = new MemoryView(UUID.randomUUID(), "alice", Instant.now(), MemoryType.FACT, "usuário", "vive em", "Recife", null);
+        var memory = new MemoryView(UUID.randomUUID(), ALICE.getId(), Instant.now(), MemoryType.FACT, "usuário", "vive em", "Recife", null);
         doAnswer(invocation -> {
             worker.set(Thread.currentThread());
             started.countDown();
@@ -43,7 +45,7 @@ class AsyncMemoryIndexingServiceTest {
 
     @Test void failedIndexIsLoggedWithoutRetryOrFailedFuture() throws Exception {
         var indexer = mock(MemoryIndexer.class);
-        var memory = new MemoryView(UUID.randomUUID(), "alice", Instant.now(), MemoryType.FACT, "usuário", "vive em", "Recife", null);
+        var memory = new MemoryView(UUID.randomUUID(), ALICE.getId(), Instant.now(), MemoryType.FACT, "usuário", "vive em", "Recife", null);
         doThrow(new IllegalStateException("offline")).when(indexer).index(List.of(memory));
         try (var context = context(indexer)) {
             context.getBean(AsyncMemoryIndexingService.class).index(List.of(memory)).get(5, TimeUnit.SECONDS);

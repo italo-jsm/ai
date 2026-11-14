@@ -16,11 +16,11 @@ public class SemanticMemoryRetriever implements MemoryRetriever {
     }
 
     @Override
-    public List<MemoryView> retrieve(String userId, String message, int limit) {
+    public List<MemoryView> retrieve(UUID userId, String message, int limit) {
         MemoryRetriever.validate(userId, message, limit);
         var filters = new FilterExpressionBuilder();
         var documents = vectorStore.similaritySearch(SearchRequest.builder().query(message).topK(limit)
-            .filterExpression(filters.and(filters.eq("userId", userId), filters.eq("kind", "memory")).build()).build());
+            .filterExpression(filters.and(filters.eq("userId", userId.toString()), filters.eq("kind", "memory")).build()).build());
         if (documents.isEmpty()) return List.of();
         var ids = new LinkedHashSet<UUID>();
         for (var document : documents) {

@@ -1,6 +1,7 @@
 package com.italo.ai.chat;
 
 import com.italo.ai.memory.model.MemoryExtraction;
+import com.italo.ai.user.UserEntity;
 import com.italo.ai.memory.service.MemoryExtractor;
 import com.italo.ai.memory.service.MemoryService;
 import com.italo.ai.memory.service.MemoryContextService;
@@ -30,8 +31,10 @@ public class ChatService {
         this.memoryIndexer = memoryIndexer;
     }
 
-    public String chat(String userId, String message) {
-        String context = memoryContext.contextFor(userId, message);
+    public String chat(UserEntity user, String message) {
+        if (user == null) throw new IllegalArgumentException("Informe um usuário cadastrado.");
+        if (message == null || message.isBlank()) throw new IllegalArgumentException("Informe uma mensagem.");
+        String context = memoryContext.contextFor(user.getId(), message);
         var prompt = chatClient.prompt();
         if (!context.isEmpty()) prompt.messages(new SystemMessage(context));
         String answer = prompt
@@ -40,7 +43,7 @@ public class ChatService {
                 .content();
         MemoryExtraction extraction =
                 extractor.extract(message);
-        var saved = memoryService.save(userId, extraction);
+        var saved = memoryService.save(user, extraction);
         var memories = saved.stream().map(MemoryService.MemoryView::from).toList();
         try {
             memoryIndexer.index(memories);

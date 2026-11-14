@@ -2,6 +2,7 @@ package com.italo.ai.telegram;
 
 import com.italo.ai.telegram.model.TelegramUpdate;
 import com.italo.ai.chat.ChatService;
+import com.italo.ai.user.UserService;
 import org.springframework.amqp.AmqpRejectAndDontRequeueException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,9 +19,12 @@ public class TelegramConsumer {
     private final ChatService chatService;
     private final TelegramBotClient botClient;
 
-    public TelegramConsumer(ChatService chatService, TelegramBotClient botClient) {
+    private final UserService users;
+
+    public TelegramConsumer(ChatService chatService, TelegramBotClient botClient, UserService users) {
         this.chatService = chatService;
         this.botClient = botClient;
+        this.users = users;
     }
 
     @RabbitListener(queues = "${app.telegram.queue}", messageConverter = "telegramMessageConverter")
@@ -34,7 +38,13 @@ public class TelegramConsumer {
             return;
         }
         try {
-            String answer = chatService.chat("telegram:" + message.from().id(), message.text());
+            var user = users.findByTelegramUserId(message.from().id());
+            if (user.isEmpty()) {
+                botClient.sendMessage(message.chat().id(), message.messageId(),
+                        "Seu usuário do Telegram ainda não está cadastrado.");
+                return;
+            }
+            String answer = chatService.chat(user.get(), message.text());
             botClient.sendMessage(message.chat().id(), message.messageId(), answer);
             log.info("Update do Telegram respondido: updateId={}", update.updateId());
         } catch (RuntimeException failure) {

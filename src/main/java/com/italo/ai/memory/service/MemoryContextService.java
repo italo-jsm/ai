@@ -1,5 +1,6 @@
 package com.italo.ai.memory.service;
 
+import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import com.italo.ai.memory.retrieval.MemoryRetriever;
 import org.springframework.stereotype.Service;
@@ -19,7 +20,7 @@ public class MemoryContextService {
         this.limit = limit;
     }
 
-    public String contextFor(String userId, String message) {
+    public String contextFor(UUID userId, String message) {
         var saved = memories.retrieve(userId, message, limit);
         if (saved.isEmpty()) return "";
         var facts = saved.stream().map(formatter::format)

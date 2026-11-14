@@ -24,6 +24,8 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import com.italo.ai.chat.ChatService;
+import com.italo.ai.user.UserService;
+import static com.italo.ai.support.TestUsers.ALICE;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 
@@ -35,8 +37,10 @@ class TelegramRabbitIntegrationTest {
         String queueName = "ai.telegram.test." + UUID.randomUUID();
         var chat = mock(ChatService.class);
         var bot = mock(TelegramBotClient.class);
-        when(chat.chat("telegram:1234", "Teste isolado")).thenReturn("Resposta");
-        var consumer = spy(new TelegramConsumer(chat, bot));
+        var users = mock(UserService.class);
+        when(users.findByTelegramUserId(1234L)).thenReturn(java.util.Optional.of(ALICE));
+        when(chat.chat(ALICE, "Teste isolado")).thenReturn("Resposta");
+        var consumer = spy(new TelegramConsumer(chat, bot, users));
         try (var context = new AnnotationConfigApplicationContext()) {
             context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("test",
                     Map.of("app.telegram.enabled", "true", "app.telegram.queue", queueName)));
