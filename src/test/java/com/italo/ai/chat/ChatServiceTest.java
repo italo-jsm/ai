@@ -37,6 +37,33 @@ class ChatServiceTest {
         verify(memoryService).save(ALICE, extraction);
     }
 
+    @Test void retainsSixTurnsPerTelegramChatAndKeepsApiSeparate() {
+        var model = mock(ChatModel.class);
+        when(model.getOptions()).thenReturn(org.springframework.ai.chat.prompt.ChatOptions.builder().build());
+        when(model.call(any(Prompt.class))).thenReturn(new ChatResponse(List.of(new Generation(new AssistantMessage("Resposta")))));
+        var context = mock(MemoryContextService.class);
+        when(context.contextFor(eq(ALICE.getId()), anyString())).thenReturn("");
+        var service = new ChatService(ChatClient.builder(model).build(), mock(MemoryExtractor.class),
+                mock(MemoryService.class), context, mock(AsyncMemoryIndexingService.class));
+
+        for (int turn = 1; turn <= 7; turn++) {
+            service.chatFromTelegram(ALICE, "Pergunta " + turn, 10L, null);
+        }
+        service.chatFromTelegram(ALICE, "Continuação", 10L, null);
+        service.chatFromTelegram(ALICE, "Outro chat", 20L, null);
+        service.chat(ALICE, "Via API");
+
+        var prompts = ArgumentCaptor.forClass(Prompt.class);
+        verify(model, times(10)).call(prompts.capture());
+        assertThat(prompts.getAllValues().get(7).getInstructions()).extracting(message -> message.getText())
+                .containsExactly("Pergunta 2", "Resposta", "Pergunta 3", "Resposta", "Pergunta 4", "Resposta",
+                        "Pergunta 5", "Resposta", "Pergunta 6", "Resposta", "Pergunta 7", "Resposta", "Continuação");
+        assertThat(prompts.getAllValues().get(8).getInstructions()).extracting(message -> message.getText())
+                .containsExactly("Outro chat");
+        assertThat(prompts.getAllValues().get(9).getInstructions()).extracting(message -> message.getText())
+                .containsExactly("Via API");
+    }
+
     @Test void indexesOnlyAfterSaveAndReturnsAnswer() {
         var fixture = new Fixture();
         var saved = new MemoryEntity(ALICE, new MemoryCandidate(MemoryType.PREFERENCE, "usuário", "prefere", "café", null));

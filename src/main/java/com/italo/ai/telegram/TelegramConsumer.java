@@ -62,14 +62,14 @@ public class TelegramConsumer {
             if (privateChat && finance.isPresent()) {
                 var integration = finance.get();
                 var tools = integration.toolsFor(owner);
-                answer = chatService.chat(owner, message.text(), tools);
+                answer = chatService.chatFromTelegram(owner, message.text(), message.chat().id(), tools);
                 if (tools.needsLogin()) {
                     botClient.sendMessageWithoutPreview(message.chat().id(), message.messageId(),
                             integration.loginMessage(owner));
                     return;
                 }
             } else {
-                answer = chatService.chat(owner, message.text());
+                answer = chatService.chatFromTelegram(owner, message.text(), message.chat().id(), null);
             }
             botClient.sendMessage(message.chat().id(), message.messageId(), answer);
             log.info("Update do Telegram respondido: updateId={}", update.updateId());

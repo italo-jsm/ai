@@ -26,12 +26,12 @@ class TelegramConsumerTest {
     }
 
     @Test void answersInOriginChatUsingSenderIdentity() {
-        when(chat.chat(ALICE, "Olá")).thenReturn("Oi!");
+        when(chat.chatFromTelegram(ALICE, "Olá", -1001234567890L, null)).thenReturn("Oi!");
 
         consumer.consume(update("Olá", false));
 
         var order = inOrder(chat, bot);
-        order.verify(chat).chat(ALICE, "Olá");
+        order.verify(chat).chatFromTelegram(ALICE, "Olá", -1001234567890L, null);
         order.verify(bot).sendMessage(-1001234567890L, 7L, "Oi!");
     }
 
@@ -39,7 +39,7 @@ class TelegramConsumerTest {
         var tools = mock(FinanceTools.class);
         String question = "Qual é o saldo da minha conta corrente?";
         when(finance.toolsFor(ALICE)).thenReturn(tools);
-        when(chat.chat(ALICE, question, tools)).thenReturn("Saldo de 50,25.");
+        when(chat.chatFromTelegram(ALICE, question, 5123456789L, tools)).thenReturn("Saldo de 50,25.");
 
         consumer.consume(privateUpdate(question));
 
@@ -50,7 +50,7 @@ class TelegramConsumerTest {
         var tools = mock(FinanceTools.class);
         String question = "Qual o saldo?";
         when(finance.toolsFor(ALICE)).thenReturn(tools);
-        when(chat.chat(ALICE, question, tools)).thenReturn("Resposta do modelo");
+        when(chat.chatFromTelegram(ALICE, question, 5123456789L, tools)).thenReturn("Resposta do modelo");
         when(tools.needsLogin()).thenReturn(true);
         when(finance.loginMessage(ALICE)).thenReturn("Entre em https://ai.example/finance/oauth/start?ticket=exemplo");
 
@@ -63,11 +63,11 @@ class TelegramConsumerTest {
 
     @Test void financeToolsAreUnavailableInGroups() {
         String question = "Qual o saldo?";
-        when(chat.chat(ALICE, question)).thenReturn("Resposta sem dados do Finance");
+        when(chat.chatFromTelegram(ALICE, question, -1001234567890L, null)).thenReturn("Resposta sem dados do Finance");
         consumer.consume(update(question, false));
 
         verifyNoInteractions(finance);
-        verify(chat).chat(ALICE, question);
+        verify(chat).chatFromTelegram(ALICE, question, -1001234567890L, null);
     }
 
     private TelegramUpdate privateUpdate(String text) {
@@ -89,7 +89,7 @@ class TelegramConsumerTest {
     }
 
     @Test void rejectsProcessingFailureWithoutRequeueOrLeakingCause() {
-        when(chat.chat(any(), anyString())).thenThrow(new IllegalStateException("segredo"));
+        when(chat.chatFromTelegram(any(), anyString(), anyLong(), isNull())).thenThrow(new IllegalStateException("segredo"));
 
         assertThatThrownBy(() -> consumer.consume(update("Olá", false)))
                 .isInstanceOf(AmqpRejectAndDontRequeueException.class)
@@ -98,12 +98,12 @@ class TelegramConsumerTest {
     }
 
     @Test void rejectsSendFailureWithoutRegeneratingAnswer() {
-        when(chat.chat(any(), anyString())).thenReturn("Oi!");
+        when(chat.chatFromTelegram(any(), anyString(), anyLong(), isNull())).thenReturn("Oi!");
         doThrow(new IllegalStateException("token secreto")).when(bot).sendMessage(anyLong(), anyLong(), anyString());
 
         assertThatThrownBy(() -> consumer.consume(update("Olá", false)))
                 .isInstanceOf(AmqpRejectAndDontRequeueException.class).hasNoCause();
-        verify(chat).chat(ALICE, "Olá");
+        verify(chat).chatFromTelegram(ALICE, "Olá", -1001234567890L, null);
     }
 
     private TelegramUpdate update(String text, boolean isBot) {

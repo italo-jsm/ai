@@ -6,7 +6,12 @@ import com.italo.ai.user.UserEntity;
 import com.italo.ai.memory.service.MemoryExtractor;
 import com.italo.ai.memory.service.MemoryService;
 import com.italo.ai.memory.service.MemoryContextService;
+import java.util.List;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.memory.MessageWindowChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import com.italo.ai.memory.indexing.AsyncMemoryIndexingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +21,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class ChatService {
 
+    private final ChatMemory chatMemory = MessageWindowChatMemory.builder().maxMessages(12).build();
     private final ChatClient chatClient;
     private final MemoryExtractor extractor;
     private final MemoryService memoryService;
@@ -37,8 +43,17 @@ public class ChatService {
     }
 
     public String chat(UserEntity user, String message, FinanceTools financeTools) {
+        return chat(user, message, financeTools, "api");
+    }
+
+    public String chatFromTelegram(UserEntity user, String message, long chatId, FinanceTools financeTools) {
+        return chat(user, message, financeTools, "telegram:" + chatId);
+    }
+
+    private String chat(UserEntity user, String message, FinanceTools financeTools, String conversationScope) {
         if (user == null) throw new IllegalArgumentException("Informe um usuário cadastrado.");
         if (message == null || message.isBlank()) throw new IllegalArgumentException("Informe uma mensagem.");
+        String conversationId = conversationScope + ":" + user.getId();
         String context = memoryContext.contextFor(user.getId(), message);
         var prompt = chatClient.prompt();
         if (!context.isEmpty()) prompt.messages(new SystemMessage(context));
@@ -56,6 +71,7 @@ public class ChatService {
                     Se a tool indicar que o usuário precisa autorizar o acesso, encerre a consulta.
                     """));
         }
+        prompt.messages(chatMemory.get(conversationId));
         String answer;
         try {
             answer = prompt.user(message).call().content();
@@ -73,6 +89,11 @@ public class ChatService {
             memoryIndexer.index(memories);
         } catch (RuntimeException failure) {
             log.warn("Falha ao agendar indexação de {} memórias; tipo={}", memories.size(), failure.getClass().getSimpleName());
+        }
+        if (answer != null && !answer.isBlank()) {
+            synchronized (chatMemory) {
+                chatMemory.add(conversationId, List.of(new UserMessage(message), new AssistantMessage(answer)));
+            }
         }
         return answer;
     }
