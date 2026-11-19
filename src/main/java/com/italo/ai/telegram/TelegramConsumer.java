@@ -2,7 +2,9 @@ package com.italo.ai.telegram;
 
 import com.italo.ai.telegram.model.TelegramUpdate;
 import com.italo.ai.chat.ChatService;
+import com.italo.ai.finance.FinanceTelegram;
 import com.italo.ai.user.UserService;
+import java.util.Optional;
 import org.springframework.amqp.AmqpRejectAndDontRequeueException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,12 +23,15 @@ public class TelegramConsumer {
 
     private final UserService users;
     private final TelegramRegistrationService registrations;
+    private final Optional<FinanceTelegram> finance;
 
-    public TelegramConsumer(ChatService chatService, TelegramBotClient botClient, UserService users, TelegramRegistrationService registrations) {
+    public TelegramConsumer(ChatService chatService, TelegramBotClient botClient, UserService users,
+                            TelegramRegistrationService registrations, Optional<FinanceTelegram> finance) {
         this.chatService = chatService;
         this.botClient = botClient;
         this.users = users;
         this.registrations = registrations;
+        this.finance = finance;
     }
 
     @RabbitListener(queues = "${app.telegram.queue}", messageConverter = "telegramMessageConverter")
@@ -51,7 +56,21 @@ public class TelegramConsumer {
                         "Sua conta já está cadastrada. Pode enviar sua pergunta.");
                 return;
             }
-            String answer = chatService.chat(user.get(), message.text());
+            var owner = user.get();
+            boolean privateChat = "private".equals(message.chat().type()) && message.from().id().equals(message.chat().id());
+            String answer;
+            if (privateChat && finance.isPresent()) {
+                var integration = finance.get();
+                var tools = integration.toolsFor(owner);
+                answer = chatService.chat(owner, message.text(), tools);
+                if (tools.needsLogin()) {
+                    botClient.sendMessageWithoutPreview(message.chat().id(), message.messageId(),
+                            integration.loginMessage(owner));
+                    return;
+                }
+            } else {
+                answer = chatService.chat(owner, message.text());
+            }
             botClient.sendMessage(message.chat().id(), message.messageId(), answer);
             log.info("Update do Telegram respondido: updateId={}", update.updateId());
         } catch (org.springframework.dao.DataIntegrityViolationException conflict) {

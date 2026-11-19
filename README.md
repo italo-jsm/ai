@@ -513,3 +513,49 @@ até que um administrador provisione um hash BCrypt de uma senha definida pelo
 proprietário, por um canal confiável. Não há senha padrão nem endpoint público
 para definir senha de uma conta antiga. Recuperação e provisionamento por e-mail
 ficam fora deste MVP.
+
+## Cliente Finance
+
+Injete `FinanceClient` em um componente Spring e passe o cabeçalho
+`Authorization` no formato `Bearer <access-token>` do Keycloak em cada chamada.
+
+```java
+var invoice = financeClient.getInvoice("Bearer " + accessToken, accountId, "2026-11");
+```
+
+O cliente usa `https://finance.italomariano.dev.br` e timeout de 10 segundos por
+padrão. Configure `app.finance.base-url` e `app.finance.timeout` para alterar
+esses valores. Os modelos ficam em `FinanceModels` e seguem os DTOs do serviço.
+Operações sem corpo de resposta retornam `ResponseEntity<Void>`.
+
+Para ver no console o método, a rota e o corpo JSON enviado ao Finance,
+configure `FINANCE_HTTP_LOG_LEVEL=DEBUG`. O corpo pode conter dados financeiros.
+
+[Swagger UI da Finance](https://finance.italomariano.dev.br/q/swagger-ui/)
+
+### Finance no Telegram
+
+Em uma conversa privada, pergunte ao bot, por exemplo, “Qual é o saldo da
+minha conta corrente?”. O modelo pode consultar contas, movimentações, despesas,
+faturas, rendas e fontes de renda. Você também pode pedir para criar contas,
+despesas (avulsas ou em lote), rendas pendentes e fontes de renda. Se a operação
+exigir autorização, o bot envia um link de login. É preciso concluir primeiro o cadastro normal do bot.
+
+Configure no ambiente do backend:
+
+| Variável | Valor |
+| --- | --- |
+| `FINANCE_OAUTH_ENABLED` | `true` |
+| `FINANCE_OAUTH_CLIENT_ID` | `ai-finance` por padrão |
+| `FINANCE_OAUTH_CLIENT_SECRET` | Secret do client confidencial no Keycloak |
+| `FINANCE_OAUTH_ISSUER` | `https://auth.italomariano.dev.br/realms/finance` por padrão |
+| `FINANCE_OAUTH_REDIRECT_URI` | Callback exato registrado no Keycloak. Em desenvolvimento, `http://localhost:8080/login/oauth2/code/finance` é o padrão. |
+| `FINANCE_OAUTH_ENCRYPTION_KEY` | Chave persistente de 32 bytes em Base64. Gere uma com `openssl rand -base64 32` e guarde-a com os demais segredos do backend. |
+
+O access token precisa conter `tenant-id` do usuário e a realm role `user`. O
+link dura 10 minutos e funciona uma vez. Os tokens são criptografados no banco
+e renovados com o refresh token de cada usuário. Use a mesma chave em todas as
+réplicas e reinicializações.
+
+Para testar em localhost, abra o link do Telegram no navegador da mesma máquina
+em que o backend está rodando. Após o callback, repita sua pergunta para consultar o Finance.
