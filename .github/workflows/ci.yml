@@ -1,4 +1,4 @@
-name: Build and publish AI image
+name: Build, publish and deploy AI image
 
 on:
   pull_request:
@@ -34,6 +34,8 @@ jobs:
     if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
+    concurrency:
+      group: publish-ai-main
     permissions:
       contents: read
       packages: write
@@ -55,6 +57,7 @@ jobs:
       - name: Set image tag
         run: echo "IMAGE_TAG=sha-${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
       - name: Build and publish image
+        id: image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -63,3 +66,49 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
             ${{ env.IMAGE_NAME }}:latest
+
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v4
+        with:
+          repository: italo-jsm/gitops
+          ref: main
+          token: ${{ secrets.INFRA_REPO_TOKEN }}
+          path: gitops
+
+      - name: Update AI deployment in GitOps
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        shell: bash
+        run: |
+          main_head=$(git ls-remote --exit-code origin refs/heads/main | cut -f1)
+          if [[ "$main_head" != "$GITHUB_SHA" ]]; then
+            echo "Skipping GitOps update because main has moved."
+            exit 0
+          fi
+
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::Buildx did not return a valid image digest."
+            exit 1
+          fi
+
+          cd gitops
+          deployment=applications/ai/deployment.yaml
+          image_pattern='^([[:blank:]]*image:[[:blank:]]+)ghcr\.io/italo-jsm/ai@sha256:[a-f0-9]{64}$'
+          if [[ "$(grep -Ec "$image_pattern" "$deployment")" != 1 ]]; then
+            echo "::error file=gitops/$deployment::Expected exactly one AI image pinned by digest."
+            exit 1
+          fi
+          sed -i -E "s|${image_pattern}|\\1${IMAGE_NAME}@${IMAGE_DIGEST}|" "$deployment"
+
+          git add -- "$deployment"
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: update ai image to ${IMAGE_TAG}"
+          if ! git push origin HEAD:main; then
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
