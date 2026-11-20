@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -82,6 +83,19 @@ class FinanceCreationToolsTest {
     }
 
     @Test
+    void createsCheckingAccountWithOnlyNameAndZeroBalance() {
+        when(links.accessToken(user, null)).thenReturn(Optional.of("user-token"));
+        when(client.createAccount(eq(AUTHORIZATION), any()))
+                .thenReturn(ResponseEntity.status(HttpStatus.CREATED).build());
+
+        assertThat(callback("criarContaCorrente").call("""
+                {"nome":"Itaú","saldoInicial":0}
+                """)).contains("Conta criada.");
+        verify(client).createAccount(AUTHORIZATION,
+                new CreateAccountCommand("Itaú", AccountType.CHECKING_ACCOUNT, null, null, BigDecimal.ZERO));
+    }
+
+    @Test
     void rejectsMissingAccountArgumentsBeforeMakingAnHttpCall() {
         assertThat(callback("criarConta").call("""
                 {"nome":"Cartão Itaú","tipo":"CREDIT_CARD","diaFechamento":21}
@@ -106,6 +120,77 @@ class FinanceCreationToolsTest {
     }
 
     @Test
+    void sendsOneInstallmentForCompletedPix() {
+        when(links.accessToken(user, null)).thenReturn(Optional.of("user-token"));
+        when(client.listAccounts(AUTHORIZATION)).thenReturn(ResponseEntity.ok(List.of(
+                new FinanceModels.AccountDto("Itau", AccountType.CHECKING_ACCOUNT, ACCOUNT, true, BigDecimal.ZERO))));
+        when(client.createExpense(eq(AUTHORIZATION), any()))
+                .thenReturn(ResponseEntity.status(HttpStatus.CREATED).build());
+
+        String input = """
+                {"despesa":{"description":"Faxina","amount":180,"eventDate":"2026-11-18","category":"OTHER",
+                    "accountId":"%s","paymentMethod":"PIX","paymentDate":"2026-11-18"}}
+                """.formatted(ACCOUNT);
+        tools.useCurrentMessage("Fiz um PIX de 180 reais para pagar a faxineira hoje.");
+        assertThat(callback("criarDespesa").call(input)).contains("Qual conta você usou?");
+        verify(client, never()).createExpense(any(), any());
+
+        tools.useCurrentMessage("Usei o Itaú.");
+        assertThat(callback("criarDespesa").call(input)).contains("Despesa criada.");
+        verify(client).createExpense(AUTHORIZATION, new CreateExpenseCommand("Faxina", new BigDecimal("180"),
+                LocalDate.of(2026, 11, 18), ExpenseCategory.OTHER, ACCOUNT, 1,
+                FinanceModels.PaymentMethod.PIX, LocalDate.of(2026, 11, 18), null));
+    }
+
+    @Test
+    void retriesTheSamePurchaseOnTheCardAfterFinanceRejectsTheCheckingAccount() {
+        when(links.accessToken(user, null)).thenReturn(Optional.of("user-token"));
+        when(client.listAccounts(AUTHORIZATION)).thenReturn(ResponseEntity.ok(List.of(
+                new FinanceModels.AccountDto("Itaú", AccountType.CHECKING_ACCOUNT, ACCOUNT, true, BigDecimal.ZERO),
+                new FinanceModels.AccountDto("Itaú", AccountType.CREDIT_CARD, SOURCE, true, null))));
+        String reason = "Compras parceladas só podem ser registradas em cartão de crédito.";
+        byte[] body = ("{\"code\":\"INSTALLMENT_ACCOUNT_TYPE_INVALID\",\"message\":\"" + reason + "\"}")
+                .getBytes(StandardCharsets.UTF_8);
+        when(client.createExpense(eq(AUTHORIZATION), any())).thenThrow(HttpClientErrorException.create(
+                HttpStatus.BAD_REQUEST, "Bad Request", HttpHeaders.EMPTY, body, StandardCharsets.UTF_8))
+                .thenReturn(ResponseEntity.status(HttpStatus.CREATED).build());
+
+        var purchase = callback("criarCompra");
+        assertThat(purchase.getToolDefinition().inputSchema()).doesNotContain("paymentMethod", "paymentDate");
+        String input = """
+                {"description":"Máquina de lavar","amount":2200,"eventDate":"2026-11-19",
+                    "category":"OTHER","accountId":"%s","installments":21}
+                """;
+        tools.useCurrentMessage("Conta corrente do Itau");
+        assertThat(tools.consultarContas("Conta corrente do Itau").dados()).singleElement()
+                .satisfies(account -> assertThat(account.accountId()).isEqualTo(ACCOUNT));
+        assertThat(purchase.call(input.formatted(ACCOUNT)))
+                .contains(reason).doesNotContain("HTTP 400", "INSTALLMENT_ACCOUNT_TYPE_INVALID");
+
+        tools.useCurrentMessage("21 parcelas no cartao de credito");
+        assertThat(tools.consultarContas("cartao de credito").dados()).singleElement()
+                .satisfies(account -> assertThat(account.accountId()).isEqualTo(SOURCE));
+        assertThat(purchase.call(input.formatted(SOURCE))).contains("Despesa criada.");
+
+        for (UUID accountId : List.of(ACCOUNT, SOURCE)) {
+            verify(client).createExpense(AUTHORIZATION, new CreateExpenseCommand("Máquina de lavar",
+                    new BigDecimal("2200"), LocalDate.of(2026, 11, 19), ExpenseCategory.OTHER,
+                    accountId, 21, null, null, null));
+        }
+    }
+
+    @Test
+    void blocksIncompleteExpenseBeforeCallingFinance() {
+        assertThat(callback("criarDespesa").call("""
+                {"despesa":{"description":"Faxina","category":"OTHER"}}
+                """)).contains("amount");
+        assertThat(callback("criarDespesasEmLote").call("""
+                {"despesas":[{"description":"Faxina","amount":180,"category":"OTHER"}]}
+                """)).contains("eventDate");
+        verifyNoInteractions(client);
+    }
+
+    @Test
     void requestsLoginBeforeCreatingAnything() {
         when(links.accessToken(user, null)).thenReturn(Optional.empty());
 
@@ -115,17 +200,18 @@ class FinanceCreationToolsTest {
     }
 
     @Test
-    void reportsHttpStatusAndBusinessCodeWithoutExposingTheErrorBody() {
+    void reportsTheFinanceBusinessReasonWithoutExposingOtherFields() {
         when(links.accessToken(user, null)).thenReturn(Optional.of("user-token"));
         byte[] body = """
-                {"code":"ACCOUNT_DUE_DAY_INVALID","message":"conteúdo interno"}
+                {"code":"ACCOUNT_DUE_DAY_INVALID","message":"Dia de vencimento inválido.","detail":"conteúdo interno"}
                 """.getBytes(StandardCharsets.UTF_8);
         when(client.createAccount(eq(AUTHORIZATION), any())).thenThrow(HttpClientErrorException.create(
                 HttpStatus.BAD_REQUEST, "Bad Request", HttpHeaders.EMPTY, body, StandardCharsets.UTF_8));
 
         assertThat(callback("criarConta").call("""
                 {"nome":"Cartão","tipo":"CREDIT_CARD","diaFechamento":21,"diaVencimento":32}
-                """)).contains("HTTP 400", "ACCOUNT_DUE_DAY_INVALID").doesNotContain("conteúdo interno", "user-token");
+                """)).contains("Dia de vencimento inválido.")
+                .doesNotContain("HTTP 400", "ACCOUNT_DUE_DAY_INVALID", "conteúdo interno", "user-token");
     }
 
     @Test

@@ -64,6 +64,20 @@ class ChatServiceTest {
                 .containsExactly("Via API");
     }
 
+    @Test void removesTechnicalDetailsFromFinanceReplies() {
+        var fixture = new Fixture();
+        String rawAnswer = """
+                Conta: Cartão Itaú (UUID: 5ec7f892-b3db-4d76-ab02-98d995008fc6)
+                Compras parceladas só podem ser registradas em cartão de crédito.
+                Diagnóstico: HTTP 400, INSTALLMENT_ACCOUNT_TYPE_INVALID.
+                """;
+        when(fixture.model.call(any(Prompt.class)))
+                .thenReturn(new ChatResponse(List.of(new Generation(new AssistantMessage(rawAnswer)))));
+
+        assertThat(fixture.service.chat(ALICE, "mensagem", mock(com.italo.ai.finance.FinanceTools.class)))
+                .isEqualTo("Conta: Cartão Itaú\nCompras parceladas só podem ser registradas em cartão de crédito.");
+    }
+
     @Test void indexesOnlyAfterSaveAndReturnsAnswer() {
         var fixture = new Fixture();
         var saved = new MemoryEntity(ALICE, new MemoryCandidate(MemoryType.PREFERENCE, "usuário", "prefere", "café", null));
@@ -96,9 +110,9 @@ class ChatServiceTest {
         final MemoryService memories = mock(MemoryService.class);
         final AsyncMemoryIndexingService indexer = mock(AsyncMemoryIndexingService.class);
         final MemoryExtraction extraction = new MemoryExtraction(List.of());
+        final ChatModel model = mock(ChatModel.class);
         final ChatService service;
         Fixture() {
-            var model = mock(ChatModel.class);
             when(model.getOptions()).thenReturn(org.springframework.ai.chat.prompt.ChatOptions.builder().build());
             when(model.call(any(Prompt.class))).thenReturn(new ChatResponse(List.of(new Generation(new AssistantMessage("Resposta")))));
             var context = mock(MemoryContextService.class);

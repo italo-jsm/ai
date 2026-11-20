@@ -43,7 +43,11 @@ public final class FinanceModels {
             @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty(required = false) Integer installments,
             @JsonProperty(required = false) PaymentMethod paymentMethod,
             @JsonProperty(required = false) LocalDate paymentDate,
-            @JsonProperty(required = false) UUID paidFromAccountId) {}
+            @JsonProperty(required = false) UUID paidFromAccountId) {
+        public CreateExpenseCommand {
+            if (paymentMethod != null && installments == null) installments = 1;
+        }
+    }
 
     public record PayExpenseRequest(
             UUID paidFromAccountId, LocalDate paymentDate, PaymentMethod paymentMethod) {}

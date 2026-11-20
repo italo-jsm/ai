@@ -19,7 +19,8 @@ Requisitos: JDK 21, Docker com Compose, Ollama local para embeddings e um modelo
    ```
 
    O modelo `nomic-embed-text` gera os embeddings de 768 dimensoes para o pgvector.
-   Para chat local, prepare também `ollama pull qwen2.5:7b`.
+   Para chat local, execute `ollama pull gpt-oss:20b` e depois
+   `ollama create high-context -f Modelfile.high-context`.
    Com chat na nuvem, o Ollama executa apenas embeddings.
    A aplicacao nao baixa modelos automaticamente.
 
@@ -43,7 +44,7 @@ Requisitos: JDK 21, Docker com Compose, Ollama local para embeddings e um modelo
 
    A aplicação não carrega `.env` automaticamente. Cada perfil exige somente
    suas próprias variáveis. `OLLAMA_CHAT_MODEL` altera o modelo local (padrão
-   `qwen2.5:7b`). Sem perfil explícito, `./gradlew bootRun` usa Ollama.
+   `high-context:latest`, com 32.768 tokens de contexto). Sem perfil explícito, `./gradlew bootRun` usa Ollama.
    Ao ativar outros perfis de ambiente, inclua também o perfil do provedor.
 
 Por padrão, o Ollama é acessado em `http://localhost:11434`. O Spring AI inicializa sua tabela
