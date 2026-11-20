@@ -32,7 +32,7 @@ class TelegramConsumerTest {
 
         var order = inOrder(chat, bot);
         order.verify(chat).chatFromTelegram(ALICE, "Olá", -1001234567890L, null);
-        order.verify(bot).sendMessage(-1001234567890L, 7L, "Oi!");
+        order.verify(bot).sendAnswer(-1001234567890L, 7L, "Oi!");
     }
 
     @Test void naturalLanguageFinanceQuestionUsesToolsBoundToPrivateSender() {
@@ -43,7 +43,7 @@ class TelegramConsumerTest {
 
         consumer.consume(privateUpdate(question));
 
-        verify(bot).sendMessage(5123456789L, 7L, "Saldo de 50,25.");
+        verify(bot).sendAnswer(5123456789L, 7L, "Saldo de 50,25.");
     }
 
     @Test void sendsTheApplicationLoginLinkWhenAToolRequiresAuthorization() {
@@ -99,7 +99,7 @@ class TelegramConsumerTest {
 
     @Test void rejectsSendFailureWithoutRegeneratingAnswer() {
         when(chat.chatFromTelegram(any(), anyString(), anyLong(), isNull())).thenReturn("Oi!");
-        doThrow(new IllegalStateException("token secreto")).when(bot).sendMessage(anyLong(), anyLong(), anyString());
+        doThrow(new IllegalStateException("token secreto")).when(bot).sendAnswer(anyLong(), anyLong(), anyString());
 
         assertThatThrownBy(() -> consumer.consume(update("Olá", false)))
                 .isInstanceOf(AmqpRejectAndDontRequeueException.class).hasNoCause();

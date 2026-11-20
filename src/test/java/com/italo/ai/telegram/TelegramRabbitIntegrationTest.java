@@ -76,7 +76,7 @@ class TelegramRabbitIntegrationTest {
             verify(consumer, timeout(10000)).consume(argThat((TelegramUpdate update) ->
                     update.updateId() == 123L && update.message().chat().id() == 9876543210L
                             && "Teste isolado".equals(update.message().text())));
-            verify(bot, timeout(10000)).sendMessage(9876543210L, 7L, "Resposta");
+            verify(bot, timeout(10000)).sendAnswer(9876543210L, 7L, "Resposta");
         }
     }
 

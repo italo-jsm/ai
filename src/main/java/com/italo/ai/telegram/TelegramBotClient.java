@@ -8,7 +8,6 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 public class TelegramBotClient {
-    private static final int TEXT_LIMIT = 4096;
     private final RestClient client;
     private final String token;
 
@@ -18,32 +17,31 @@ public class TelegramBotClient {
     }
 
     public void sendMessage(long chatId, long replyToMessageId, String text) {
-        sendMessage(chatId, replyToMessageId, text, false);
+        send(chatId, replyToMessageId, TelegramMessage.plainText(text), false);
+    }
+
+    public void sendAnswer(long chatId, long replyToMessageId, String text) {
+        send(chatId, replyToMessageId, TelegramMessageFormatter.format(text), false);
     }
 
     public void sendMessageWithoutPreview(long chatId, long replyToMessageId, String text) {
-        sendMessage(chatId, replyToMessageId, text, true);
+        send(chatId, replyToMessageId, TelegramMessage.plainText(text), true);
     }
 
-    private void sendMessage(long chatId, long replyToMessageId, String text, boolean disablePreview) {
+    private void send(long chatId, long replyToMessageId, TelegramMessage message, boolean disablePreview) {
         if (token == null || token.isBlank()) {
             throw new IllegalStateException("Configure TELEGRAM_BOT_TOKEN para responder às mensagens.");
         }
-        if (text == null || text.isBlank()) {
-            throw new IllegalArgumentException("A resposta do chat está vazia.");
-        }
-        for (int start = 0; start < text.length();) {
-            int end = Math.min(start + TEXT_LIMIT, text.length());
-            if (end < text.length() && Character.isHighSurrogate(text.charAt(end - 1))) end--;
-            sendPart(chatId, replyToMessageId, text.substring(start, end), disablePreview);
-            start = end;
+        for (var part : message.parts()) {
+            sendPart(chatId, replyToMessageId, part, disablePreview);
         }
     }
 
-    private void sendPart(long chatId, long messageId, String text, boolean disablePreview) {
+    private void sendPart(long chatId, long messageId, TelegramMessage.Part part, boolean disablePreview) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("chat_id", chatId);
-        body.put("text", text);
+        body.put("text", part.text());
+        if (!part.entities().isEmpty()) body.put("entities", part.entities());
         body.put("reply_parameters", Map.of("message_id", messageId, "allow_sending_without_reply", true));
         if (disablePreview) body.put("link_preview_options", Map.of("is_disabled", true));
         try {

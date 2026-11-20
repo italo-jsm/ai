@@ -10,8 +10,10 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.model.*;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.retry.TransientAiException;
 import java.util.List;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -55,11 +57,14 @@ class ChatServiceTest {
 
         var prompts = ArgumentCaptor.forClass(Prompt.class);
         verify(model, times(10)).call(prompts.capture());
-        assertThat(prompts.getAllValues().get(7).getInstructions()).extracting(message -> message.getText())
+        assertThat(prompts.getAllValues().get(7).getInstructions())
+                .filteredOn(message -> !(message instanceof SystemMessage)).extracting(message -> message.getText())
                 .containsExactly("Pergunta 2", "Resposta", "Pergunta 3", "Resposta", "Pergunta 4", "Resposta",
                         "Pergunta 5", "Resposta", "Pergunta 6", "Resposta", "Pergunta 7", "Resposta", "Continuação");
-        assertThat(prompts.getAllValues().get(8).getInstructions()).extracting(message -> message.getText())
+        assertThat(prompts.getAllValues().get(8).getInstructions())
+                .filteredOn(message -> !(message instanceof SystemMessage)).extracting(message -> message.getText())
                 .containsExactly("Outro chat");
+        assertThat(prompts.getAllValues().get(8).getSystemMessage().getText()).contains("Evite tabelas Markdown.");
         assertThat(prompts.getAllValues().get(9).getInstructions()).extracting(message -> message.getText())
                 .containsExactly("Via API");
     }
@@ -76,6 +81,19 @@ class ChatServiceTest {
 
         assertThat(fixture.service.chat(ALICE, "mensagem", mock(com.italo.ai.finance.FinanceTools.class)))
                 .isEqualTo("Conta: Cartão Itaú\nCompras parceladas só podem ser registradas em cartão de crédito.");
+    }
+
+    @Test void reportsMalformedFinanceToolCallWithoutRepeatingTheRequest() {
+        var fixture = new Fixture();
+        var financeTools = mock(com.italo.ai.finance.FinanceTools.class);
+        when(fixture.model.call(any(Prompt.class))).thenThrow(new TransientAiException(
+                "HTTP 500 - {\"error\":\"error parsing tool call: raw=invalid JSON\"}"));
+
+        assertThat(fixture.service.chatFromTelegram(ALICE, "mensagem", 10L, financeTools))
+                .contains("Não consegui concluir o pedido no Finance")
+                .doesNotContain("invalid JSON");
+        verify(fixture.model).call(any(Prompt.class));
+        verifyNoInteractions(fixture.memories, fixture.indexer);
     }
 
     @Test void indexesOnlyAfterSaveAndReturnsAnswer() {

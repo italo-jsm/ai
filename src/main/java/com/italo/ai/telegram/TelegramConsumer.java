@@ -71,7 +71,7 @@ public class TelegramConsumer {
             } else {
                 answer = chatService.chatFromTelegram(owner, message.text(), message.chat().id(), null);
             }
-            botClient.sendMessage(message.chat().id(), message.messageId(), answer);
+            botClient.sendAnswer(message.chat().id(), message.messageId(), answer);
             log.info("Update do Telegram respondido: updateId={}", update.updateId());
         } catch (org.springframework.dao.DataIntegrityViolationException conflict) {
             botClient.sendMessage(message.chat().id(), message.messageId(),

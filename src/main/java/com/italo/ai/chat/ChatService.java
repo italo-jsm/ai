@@ -16,6 +16,7 @@ import com.italo.ai.memory.indexing.AsyncMemoryIndexingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.retry.TransientAiException;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -63,6 +64,13 @@ public class ChatService {
         String context = memoryContext.contextFor(user.getId(), message);
         var prompt = chatClient.prompt();
         if (!context.isEmpty()) prompt.messages(new SystemMessage(context));
+        if (conversationScope.startsWith("telegram:")) {
+            prompt.messages(new SystemMessage("""
+                    Escreva para leitura no celular. Para apresentar registros com vários campos, use uma lista
+                    com um item por registro, o nome em **negrito** e os demais campos em linhas curtas.
+                    Evite tabelas Markdown.
+                    """));
+        }
         if (financeTools != null) {
             financeTools.useCurrentMessage(message);
             prompt.tools(financeTools);
@@ -78,7 +86,9 @@ public class ChatService {
                     Se o usuário já pediu para registrar e respondeu à pergunta sobre a conta, continue o registro.
                     Recupere do histórico a descrição, o valor total, a data, a forma de pagamento e o número
                     de parcelas informados para essa compra. Para "hoje", consulte a ferramenta de horário.
-                    Passe a indicação completa da conta para consultarContas, incluindo o tipo, se informado.
+                    Para listar todas as contas, chame consultarContas com os argumentos {}.
+                    Para filtrar, passe a indicação completa da conta em nome, incluindo o tipo, se informado.
+                    Os argumentos de cada ferramenta devem ser um objeto JSON válido.
                     "Conta corrente do Itaú" já especifica conta corrente. "Cartão de crédito do Itaú" já especifica cartão.
                     Para compra simples ou parcelada, chame criarCompra com o UUID retornado assim que a conta
                     estiver identificada. Preserve o valor total e as parcelas solicitadas. O Finance decide se aceita.
@@ -109,8 +119,17 @@ public class ChatService {
         } catch (RuntimeException failure) {
             // O Telegram ainda pode entregar o link se o modelo falhar depois da chamada à tool.
             if (financeTools != null && financeTools.needsLogin()) return null;
-            if (financeTools == null || financeTools.creationStatus() == null) throw failure;
-            answer = financeTools.creationStatus();
+            String creationStatus = financeTools == null ? null : financeTools.creationStatus();
+            if (creationStatus != null) {
+                answer = creationStatus;
+            } else if (financeTools != null && failure instanceof TransientAiException
+                    && failure.getMessage() != null
+                    && failure.getMessage().startsWith("HTTP 500 - {\"error\":\"error parsing tool call:")) {
+                log.warn("O Ollama rejeitou os argumentos de uma chamada ao Finance.");
+                return "Não consegui concluir o pedido no Finance. Se era um cadastro, confira os registros antes de tentar novamente.";
+            } else {
+                throw failure;
+            }
         }
         if (financeTools != null && financeTools.needsLogin()) return answer;
         if (financeTools != null && financeTools.creationFailure() != null) {

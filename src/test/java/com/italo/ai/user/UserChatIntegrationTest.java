@@ -70,7 +70,7 @@ class UserChatIntegrationTest {
         assertThat(telegramPrompt).contains("café").doesNotContain("chá secreto");
         assertThat(memories.findAll()).filteredOn(memory -> memory.getUserId().equals(user.getId()))
                 .singleElement().satisfies(memory -> assertThat(memory.getValue()).isEqualTo("café"));
-        verify(bot).sendMessage(9876543210L, 7L, "Resposta");
+        verify(bot).sendAnswer(9876543210L, 7L, "Resposta");
     }
 
     @TestConfiguration(proxyBeanMethods = false)

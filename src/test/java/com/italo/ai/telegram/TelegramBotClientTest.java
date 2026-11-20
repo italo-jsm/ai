@@ -31,6 +31,42 @@ class TelegramBotClientTest {
         server.verify();
     }
 
+    @Test void formatsAnswerTablesAndBoldUsingUtf16Offsets() {
+        server.expect(anything())
+                .andExpect(jsonPath("$.text").value(
+                        "😀 Contas disponíveis\n\n• Itaú & Cia\n  Tipo: Conta corrente\n  Saldo: -180,00 R$"))
+                .andExpect(jsonPath("$.entities[0].type").value("bold"))
+                .andExpect(jsonPath("$.entities[0].offset").value(3))
+                .andExpect(jsonPath("$.entities[0].length").value(18))
+                .andExpect(jsonPath("$.entities[1].offset").value(25))
+                .andExpect(jsonPath("$.entities[1].length").value(10))
+                .andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+        client.sendAnswer(1L, 7L, """
+                😀 **Contas disponíveis**
+
+                | Nome | Tipo | Saldo |
+                | --- | --- | --- |
+                | **Itaú & Cia** | Conta corrente | -180,00 R$ |""");
+
+        server.verify();
+    }
+
+    @Test void keepsBoldAcrossMessageParts() {
+        String firstPart = "a".repeat(4095);
+        server.expect(anything()).andExpect(jsonPath("$.text").value(firstPart))
+                .andExpect(jsonPath("$.entities[0].length").value(4095))
+                .andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+        server.expect(anything()).andExpect(jsonPath("$.text").value("😀fim"))
+                .andExpect(jsonPath("$.entities[0].offset").value(0))
+                .andExpect(jsonPath("$.entities[0].length").value(5))
+                .andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+
+        client.sendAnswer(1L, 7L, "**" + firstPart + "😀fim**");
+
+        server.verify();
+    }
+
     @Test void splitsLongResponsesWithoutBreakingEmoji() {
         String firstPart = "a".repeat(4095);
         server.expect(anything()).andExpect(jsonPath("$.text").value(firstPart))
