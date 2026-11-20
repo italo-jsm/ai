@@ -26,6 +26,15 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
+    public Optional<UserEntity> authenticate(String username, String password) {
+        if (username == null || username.isBlank()) return Optional.empty();
+        var user = users.findByUsername(UserEntity.normalizeUsername(username));
+        var hash = user.map(UserEntity::getPasswordHash).orElse(null);
+        if (!Passwords.matches(password, hash)) return Optional.empty();
+        return user.filter(account -> !account.isLoginLocked());
+    }
+
+    @Transactional(readOnly = true)
     public Optional<UserEntity> findByTelegramUserId(long telegramUserId) {
         return users.findByTelegramUserId(telegramUserId);
     }
